@@ -2,8 +2,8 @@ import Foundation
 
 /// Constants shared by every target (apps, extensions, widgets).
 enum AppGroup {
-    /// ⚠️ Change this to your own app-group identifier and keep it in sync with
-    /// the `com.apple.security.application-groups` entries in project.yml.
+    /// Configure this and every entitlement together with
+    /// `Scripts/configure_signing.py`. Never edit one target in isolation.
     static let id = "group.com.example.noisegate"
 
     static var defaults: UserDefaults {

@@ -2,10 +2,9 @@
 # Requires: https://github.com/yonaskolb/XcodeGen  (brew install xcodegen)
 #
 # BEFORE BUILDING:
-#   1. Set DEVELOPMENT_TEAM below to your Apple Team ID.
-#   2. Replace every com.example.noisegate bundle identifier (and the app-group
-#      id in Shared/AppGroup.swift + the entitlements below) with your own.
-#   3. In your Apple Developer account, enable the Family Controls capability for
+#   1. Run Scripts/configure_signing.py to update the Team ID, every bundle ID,
+#      and Shared/AppGroup.swift as one validated change.
+#   2. In your Apple Developer account, enable the Family Controls capability for
 #      the iOS app + monitor/report extension identifiers.
 
 name: NoiseGate
@@ -45,6 +44,11 @@ targets:
       path: iOS/App/Info.plist
       properties:
         UILaunchScreen: {}
+        CFBundleURLTypes:
+          - CFBundleTypeRole: Editor
+            CFBundleURLName: NoiseGate
+            CFBundleURLSchemes:
+              - noisegate
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait

@@ -3,7 +3,7 @@ import FamilyControls
 
 // MARK: - Root: custom tab shell over the three screens
 
-enum NGTab: String, CaseIterable, Identifiable {
+enum NGTab: String, CaseIterable, Identifiable, Equatable {
     case today, tracking, budgets
     var id: String { rawValue }
 
@@ -20,6 +20,16 @@ enum NGTab: String, CaseIterable, Identifiable {
         case .today: return "gauge.with.needle"
         case .tracking: return "checklist.checked"
         case .budgets: return "slider.horizontal.3"
+        }
+    }
+}
+
+extension NoiseGateRoute {
+    var tab: NGTab {
+        switch self {
+        case .today: return .today
+        case .apps: return .tracking
+        case .budgets: return .budgets
         }
     }
 }
@@ -58,6 +68,10 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.lastError ?? "")
+        }
+        .onOpenURL { url in
+            guard let route = NoiseGateRoute(url: url) else { return }
+            tab = route.tab
         }
     }
 }

@@ -89,30 +89,14 @@ final class NoiseGateMonitor: DeviceActivityMonitor {
             forKey: StoreKey.usageSnapshot,
             default: UsageSnapshot()
         ) { snapshot in
-            if snapshot.dayKey != today {
-                snapshot = UsageSnapshot(
-                    dayKey: today,
-                    distractionBudgetMinutes: config.distractionBudgetMinutes,
-                    messagesBudgetMinutes: config.messagesBudgetMinutes,
-                    isFloor: true,
-                    monitoringIsActive: true
-                )
-            }
-            if kind == "distractions" {
-                snapshot.distractionsConfigured = true
-                snapshot.distractionBudgetMinutes = budget
-                snapshot.distractionMinutes = max(
-                    snapshot.distractionMinutes,
-                    thresholdMinutes
-                )
-            } else {
-                snapshot.messagesConfigured = true
-                snapshot.messagesBudgetMinutes = budget
-                snapshot.messagesMinutes = max(snapshot.messagesMinutes, thresholdMinutes)
-            }
-            snapshot.isFloor = true
-            snapshot.monitoringIsActive = true
-            snapshot.updatedAt = .now
+            ThresholdSnapshotReducer.apply(
+                to: &snapshot,
+                today: today,
+                kind: kind,
+                budgetMinutes: budget,
+                thresholdMinutes: thresholdMinutes,
+                fallbackConfig: config
+            )
         }
         WidgetCenter.shared.reloadTimelines(ofKind: "NoiseGateWidget")
 

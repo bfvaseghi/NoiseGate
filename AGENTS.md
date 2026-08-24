@@ -36,6 +36,8 @@ Shared/
   UsageSnapshot.swift           Widget feed and v1 migration
   HistoryStore.swift            Rolling 30-day records and v1 migration
   NudgeText.swift               All iPhone and Mac notification copy
+  WidgetPresentation.swift     Tested exact/lower-bound widget semantics
+  NoiseGateRoute.swift         Stable iPhone widget deep links
   DesignSystem.swift            Adaptive visual tokens
   BudgetGauge.swift             Shared accessible ring
 iOS/
@@ -73,6 +75,9 @@ Keep the placeholders synchronized until the owner replaces them:
 - Bundle prefix: `com.example.noisegate`
 - App Group: `group.com.example.noisegate` in `project.yml` and
   `Shared/AppGroup.swift`
+
+Use `Scripts/configure_signing.py` to replace them as one validated change.
+Do not edit one identifier or App Group entry in isolation.
 
 ## Non-negotiable architecture rules
 
@@ -215,6 +220,10 @@ continue to load.
 - Use `NG.*` colors and `Font.ng*` typography.  Do not add raw view colors.
 - Orange (`NG.distraction`) means Distractions.  Teal means Messages.  Red is
   reserved for the brand and reached-budget state.
+- iPhone widget values always force lower-bound wording at the presentation
+  boundary, even if a legacy snapshot omitted its `isFloor` marker.
+- iPhone weekly widgets report only confirmed budget crossings. Never label a
+  checkpoint-only or missing day as under budget.
 - Respect Reduce Motion.  Every visual gauge needs a combined accessibility
   label and value.
 - `Design/NoiseGateIcon.svg` is the editable vector reference, and

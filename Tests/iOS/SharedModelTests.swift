@@ -160,4 +160,503 @@ final class SharedModelTests: XCTestCase {
         XCTAssertEqual(result.first?.dayKey, "2026-08-23")
         XCTAssertEqual(result.first?.distractionMinutes, 25)
     }
+
+    func testIOSWidgetPresentationForcesLowerBoundForLegacySnapshot() {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: 36,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            isFloor: false,
+            monitoringIsActive: true
+        )
+
+        let presentation = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .distractions,
+            accuracy: .lowerBound
+        )
+
+        XCTAssertEqual(presentation.valueText, "≥36m")
+        XCTAssertEqual(presentation.progressPercent, 80)
+        XCTAssertEqual(presentation.signalText, "At least 80% of budget")
+        XCTAssertTrue(presentation.accessibilityValue.hasPrefix("At least 36 minutes"))
+    }
+
+    func testFloorZeroSaysNoCheckpointInsteadOfZero() {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: 0,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
+        )
+        let presentation = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .distractions,
+            accuracy: .lowerBound
+        )
+
+        XCTAssertEqual(presentation.level, .waitingForCheckpoint)
+        XCTAssertEqual(presentation.valueText, "—")
+        XCTAssertEqual(presentation.valueAndBudgetText, "No checkpoint yet")
+        XCTAssertEqual(presentation.signalText, "No checkpoint yet")
+        XCTAssertFalse(presentation.signalText.localizedCaseInsensitiveContains("below"))
+    }
+
+    func testExactPresentationUsesExactCopyAndZero() {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: 0,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
+        )
+        let presentation = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .distractions,
+            accuracy: .exact
+        )
+
+        XCTAssertEqual(presentation.level, .clear)
+        XCTAssertEqual(presentation.valueText, "0m")
+        XCTAssertEqual(presentation.signalText, "0% of budget")
+        XCTAssertFalse(presentation.accessibilityValue.contains("At least"))
+    }
+
+    func testPresentationFractionsClampAndExtremeMinutesDoNotOverflow() {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: Int.max,
+            distractionBudgetMinutes: 5,
+            distractionsConfigured: true,
+            monitoringIsActive: true
+        )
+        let exact = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .distractions,
+            accuracy: .exact
+        )
+        let floor = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .distractions,
+            accuracy: .lowerBound
+        )
+
+        XCTAssertEqual(exact.fraction, 1)
+        XCTAssertEqual(exact.progressPercent, 100)
+        XCTAssertEqual(floor.progressPercent, 200)
+        XCTAssertEqual(exact.level, .over)
+    }
+
+    func testPresentationHandlesExtremePersistedBudget() {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: Int.max,
+            distractionBudgetMinutes: Int.max,
+            distractionsConfigured: true,
+            monitoringIsActive: true
+        )
+        let presentation = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .distractions,
+            accuracy: .lowerBound
+        )
+
+        XCTAssertEqual(presentation.fraction, 1)
+        XCTAssertEqual(presentation.progressPercent, 100)
+        XCTAssertEqual(presentation.level, .reached)
+    }
+
+    func testMessagesPresentationUsesItsOwnBudgetAndState() {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: 0,
+            messagesMinutes: 60,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 60,
+            distractionsConfigured: false,
+            messagesConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
+        )
+        let messages = WidgetLedgerPresentation(
+            snapshot: snapshot,
+            ledger: .messages,
+            accuracy: .lowerBound
+        )
+
+        XCTAssertEqual(messages.level, .reached)
+        XCTAssertEqual(messages.valueText, "≥1h 00m")
+        XCTAssertEqual(messages.signalText, "Budget crossed")
+    }
+
+    func testThresholdReducerPreservesOtherLedgerAcrossMidnight() {
+        var config = BudgetConfig()
+        config.distractionBudgetMinutes = 45
+        config.messagesBudgetMinutes = 60
+        let updateTime = Date(timeIntervalSince1970: 1_777_000_000)
+        var snapshot = UsageSnapshot(
+            dayKey: "2026-08-23",
+            distractionMinutes: 45,
+            messagesMinutes: 20,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 60,
+            distractionsConfigured: true,
+            messagesConfigured: true,
+            isFloor: true,
+            monitoringIsActive: false
+        )
+
+        XCTAssertTrue(ThresholdSnapshotReducer.apply(
+            to: &snapshot,
+            today: "2026-08-24",
+            kind: "msg",
+            budgetMinutes: 60,
+            thresholdMinutes: 6,
+            fallbackConfig: config,
+            now: updateTime
+        ))
+
+        XCTAssertEqual(snapshot.dayKey, "2026-08-24")
+        XCTAssertTrue(snapshot.distractionsConfigured)
+        XCTAssertTrue(snapshot.messagesConfigured)
+        XCTAssertEqual(snapshot.distractionMinutes, 0)
+        XCTAssertEqual(snapshot.messagesMinutes, 6)
+        XCTAssertEqual(snapshot.updatedAt, updateTime)
+    }
+
+    func testThresholdReducerIsMonotonicAndUsesEventBudget() {
+        var config = BudgetConfig()
+        config.distractionBudgetMinutes = 90
+        var snapshot = UsageSnapshot(
+            dayKey: "2026-08-24",
+            distractionMinutes: 36,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
+        )
+
+        ThresholdSnapshotReducer.apply(
+            to: &snapshot,
+            today: "2026-08-24",
+            kind: "distractions",
+            budgetMinutes: 45,
+            thresholdMinutes: 23,
+            fallbackConfig: config
+        )
+
+        XCTAssertEqual(snapshot.distractionMinutes, 36)
+        XCTAssertEqual(snapshot.distractionBudgetMinutes, 45)
+        XCTAssertFalse(ThresholdSnapshotReducer.apply(
+            to: &snapshot,
+            today: "2026-08-24",
+            kind: "unknown",
+            budgetMinutes: 45,
+            thresholdMinutes: 45,
+            fallbackConfig: config
+        ))
+    }
+
+    func testThresholdReducerLeavesUntouchedLedgerAndRejectsUnknownKind() {
+        var config = BudgetConfig()
+        var snapshot = UsageSnapshot(
+            dayKey: "2026-08-24",
+            distractionMinutes: 10,
+            messagesMinutes: 44,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 75,
+            distractionsConfigured: true,
+            messagesConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
+        )
+
+        ThresholdSnapshotReducer.apply(
+            to: &snapshot,
+            today: "2026-08-24",
+            kind: "distractions",
+            budgetMinutes: 45,
+            thresholdMinutes: 23,
+            fallbackConfig: config
+        )
+        XCTAssertEqual(snapshot.messagesMinutes, 44)
+        XCTAssertEqual(snapshot.messagesBudgetMinutes, 75)
+        XCTAssertTrue(snapshot.messagesConfigured)
+
+        let beforeInvalid = snapshot
+        XCTAssertFalse(ThresholdSnapshotReducer.apply(
+            to: &snapshot,
+            today: "2026-08-24",
+            kind: "messages",
+            budgetMinutes: 60,
+            thresholdMinutes: 30,
+            fallbackConfig: config
+        ))
+        XCTAssertEqual(snapshot, beforeInvalid)
+    }
+
+    func testEveryAllowedThresholdRoundTripsAndRoundsUp() throws {
+        let percents = BudgetConfig.progressPercents + BudgetConfig.overtimePercents
+        for kind in ["distractions", "msg"] {
+            for budget in 5...480 {
+                for percent in percents {
+                    let name = ThresholdEvent.name(
+                        kind: kind,
+                        percent: percent,
+                        generation: 1,
+                        budgetMinutes: budget
+                    )
+                    let parsed = try XCTUnwrap(ThresholdEvent.parse(name))
+                    XCTAssertEqual(parsed.kind, kind)
+                    XCTAssertEqual(parsed.thresholdMinutes, Int(
+                        (Double(budget) * Double(percent) / 100).rounded(.up)
+                    ))
+                }
+            }
+        }
+        XCTAssertEqual(ThresholdEvent.thresholdMinutes(budget: 45, percent: 10), 5)
+        XCTAssertEqual(ThresholdEvent.thresholdMinutes(budget: 45, percent: 50), 23)
+        XCTAssertEqual(ThresholdEvent.thresholdMinutes(budget: 45, percent: 150), 68)
+        XCTAssertEqual(ThresholdEvent.thresholdMinutes(budget: 5, percent: 10), 1)
+    }
+
+    func testThresholdParserRejectsInvalidContractValues() {
+        let invalid = [
+            "v2.g1.distractions.b45.m23.p50",
+            "v3.g0.distractions.b45.m23.p50",
+            "v3.g1.unknown.b45.m23.p50",
+            "v3.g1.distractions.b0.m1.p50",
+            "v3.g1.distractions.b481.m241.p50",
+            "v3.g1.distractions.b45.m23.p55",
+            "v3.g1.distractions.b45.m22.p50"
+        ]
+        for value in invalid {
+            XCTAssertNil(
+                ThresholdEvent.parse(DeviceActivityEvent.Name(value)),
+                value
+            )
+        }
+    }
+
+    func testNoiseGateRoutesRoundTripAndRejectExtraURLComponents() throws {
+        for route in NoiseGateRoute.allCases {
+            XCTAssertEqual(NoiseGateRoute(url: route.url), route)
+        }
+        XCTAssertEqual(NoiseGateRoute.today.tab, .today)
+        XCTAssertEqual(NoiseGateRoute.apps.tab, .tracking)
+        XCTAssertEqual(NoiseGateRoute.budgets.tab, .budgets)
+
+        let rejected = [
+            "https://today",
+            "noisegate://unknown",
+            "noisegate://today/extra",
+            "noisegate://today?source=widget",
+            "noisegate://today#fragment",
+            "noisegate://user@today",
+            "noisegate://today:123"
+        ]
+        for value in rejected {
+            let url = try XCTUnwrap(URL(string: value))
+            XCTAssertNil(NoiseGateRoute(url: url), value)
+        }
+    }
+
+    func testLowerBoundWeekReportsOnlyConfirmedCrossings() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 24,
+            hour: 12
+        )))
+        let history = [
+            DayRecord(
+                dayKey: "2026-08-22",
+                distractionMinutes: 36,
+                messagesMinutes: 0,
+                distractionBudgetMinutes: 45,
+                messagesBudgetMinutes: 60,
+                isFloor: false
+            ),
+            DayRecord(
+                dayKey: "2026-08-23",
+                distractionMinutes: 45,
+                messagesMinutes: 0,
+                distractionBudgetMinutes: 45,
+                messagesBudgetMinutes: 60,
+                isFloor: false
+            )
+        ]
+        let snapshot = UsageSnapshot(
+            dayKey: "2026-08-24",
+            distractionMinutes: 0,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            isFloor: false,
+            monitoringIsActive: true
+        )
+
+        let summary = WidgetWeekSummary(
+            snapshot: snapshot,
+            history: history,
+            ledger: .distractions,
+            accuracy: .lowerBound,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.days.count, 7)
+        XCTAssertEqual(summary.days.first { $0.dayKey == "2026-08-22" }?.status, .checkpoint)
+        XCTAssertEqual(summary.days.first { $0.dayKey == "2026-08-23" }?.status, .reached)
+        XCTAssertEqual(summary.days.first { $0.dayKey == "2026-08-24" }?.status, .noCheckpoint)
+        XCTAssertEqual(summary.reachedDayCount, 1)
+        XCTAssertEqual(summary.summaryText, "1 confirmed crossing")
+        XCTAssertFalse(summary.summaryText.localizedCaseInsensitiveContains("under"))
+    }
+
+    func testExactWeekDistinguishesZeroFromMissingRecord() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 24,
+            hour: 12
+        )))
+        let snapshot = UsageSnapshot(
+            dayKey: "2026-08-24",
+            distractionMinutes: 0,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            monitoringIsActive: true
+        )
+
+        let summary = WidgetWeekSummary(
+            snapshot: snapshot,
+            history: [],
+            ledger: .distractions,
+            accuracy: .exact,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.days.last?.status, .zero)
+        XCTAssertEqual(summary.days.first?.status, .noRecord)
+    }
+
+    func testWeekRemovesStoredTodayWhenLiveSnapshotIsStale() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let now = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 24,
+            hour: 12
+        )))
+        let poisonedToday = DayRecord(
+            dayKey: "2026-08-24",
+            distractionMinutes: 90,
+            messagesMinutes: 0,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 60,
+            isFloor: true
+        )
+        let staleSnapshot = UsageSnapshot(
+            dayKey: "2026-08-23",
+            distractionMinutes: 45,
+            distractionBudgetMinutes: 45,
+            distractionsConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
+        )
+
+        let summary = WidgetWeekSummary(
+            snapshot: staleSnapshot,
+            history: [poisonedToday],
+            ledger: .distractions,
+            accuracy: .lowerBound,
+            now: now,
+            calendar: calendar
+        )
+
+        XCTAssertEqual(summary.days.last?.dayKey, "2026-08-24")
+        XCTAssertEqual(summary.days.last?.status, .noRecord)
+        XCTAssertEqual(summary.reachedDayCount, 0)
+    }
+
+    func testWidgetRefreshSchedulesClampToMidnightAndHandleStaleness() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let late = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 3,
+            day: 8,
+            hour: 23,
+            minute: 55
+        )))
+        let midnight = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 3,
+            day: 9
+        )))
+        XCTAssertEqual(
+            WidgetRefreshSchedule.iOSNextRefresh(now: late, calendar: calendar),
+            midnight
+        )
+
+        let noon = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 3,
+            day: 8,
+            hour: 12
+        )))
+        XCTAssertEqual(
+            WidgetRefreshSchedule.iOSNextRefresh(now: noon, calendar: calendar)
+                .timeIntervalSince(noon),
+            15 * 60,
+            accuracy: 0.1
+        )
+
+        let fresh = UsageSnapshot(
+            distractionsConfigured: true,
+            monitoringIsActive: true,
+            updatedAt: noon.addingTimeInterval(-10)
+        )
+        XCTAssertTrue(WidgetRefreshSchedule.currentMacSnapshot(
+            fresh,
+            now: noon.addingTimeInterval(35)
+        ).monitoringIsActive)
+        XCTAssertFalse(WidgetRefreshSchedule.currentMacSnapshot(
+            fresh,
+            now: noon.addingTimeInterval(36)
+        ).monitoringIsActive)
+        XCTAssertEqual(
+            WidgetRefreshSchedule.macNextRefresh(
+                snapshot: fresh,
+                now: noon,
+                calendar: calendar
+            ).timeIntervalSince(noon),
+            36,
+            accuracy: 0.1
+        )
+
+        var stale = fresh
+        stale.monitoringIsActive = false
+        XCTAssertEqual(
+            WidgetRefreshSchedule.macNextRefresh(
+                snapshot: stale,
+                now: noon,
+                calendar: calendar
+            ).timeIntervalSince(noon),
+            5 * 60,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            WidgetRefreshSchedule.macNextRefresh(
+                snapshot: stale,
+                now: late,
+                calendar: calendar
+            ),
+            midnight
+        )
+    }
 }

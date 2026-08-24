@@ -47,6 +47,13 @@ removes.  NoiseGate never blocks, hides, or closes an app.
 | `NoiseGateMac` | Idle-aware native menu-bar tracker |
 | `NoiseGateMacWidget` | Desktop and Notification Center widget |
 
+The widgets use a signal-first hierarchy: Distractions is primary, Messages is
+secondary, and no all-screen total appears. Long-press a widget and choose
+**Edit Widget** to emphasize Distractions or Messages. Automatic mode prefers
+Distractions and falls back to Messages when that is the only configured
+ledger. iPhone includes small, medium, large, circular, rectangular, and inline
+Lock Screen layouts. Mac includes small, medium, and large layouts.
+
 Every production bundle also embeds `Shared/PrivacyInfo.xcprivacy`, which
 declares the App Group and app-local UserDefaults access NoiseGate uses for its
 on-device settings and ledgers. NoiseGate declares no tracking or collected
@@ -66,8 +73,10 @@ them.
 
 The iPhone widget therefore shows a truthful lower bound based on crossed
 thresholds.  A value such as `≥ 20m` means “at least 20 minutes,” not an exact
-total.  The report is scoped to the current device type, so an iPad does not
-silently inflate an iPhone report.
+total. The large widget describes days at or beyond the budget as confirmed
+crossings. It does not describe other days as under budget because callbacks
+can lag and the widget cannot read exact Screen Time. The report is scoped to
+the current device type, so an iPad does not silently inflate an iPhone report.
 
 The exact seven-day report answers “how much time did the apps selected now
 receive on each of the last seven days?”  Apple does not expose a historical
@@ -92,28 +101,46 @@ The Xcode project is generated from `project.yml` with
 
 ```bash
 brew install xcodegen
-xcodegen generate
-open NoiseGate.xcodeproj
 ```
 
-Before building:
+Configure signing as one synchronized change. The command first shows a diff:
 
-1. Replace `YOURTEAMID` in `project.yml` with the Apple development team.
-2. Replace every `com.example.noisegate` bundle identifier.
-3. Change `group.com.example.noisegate` in both `project.yml` and
-   `Shared/AppGroup.swift` to the matching App Group.
-4. Create that App Group in the Apple Developer portal and attach it to every
-   app and extension identifier that uses it.
-5. Enable Family Controls for the iOS app, monitor, and report identifiers.
-6. Run the iOS app on a physical device.  Screen Time data does not work in the
-   simulator.
+```bash
+python3 Scripts/configure_signing.py \
+  --team-id YOUR_REAL_TEAM_ID \
+  --app-bundle-id com.yourname.noisegate
+```
+
+Check the preview, then add `--apply`. The Team ID is the 10-character value in
+Apple Developer **Membership details**. Replace both examples with your real,
+permanent values. The app Bundle ID becomes the iOS app identifier. The script
+derives all extension identifiers and the App Group so one target cannot
+accidentally use a different value.
+
+Before building on a physical device:
+
+1. Register the script's App Group in **Certificates, Identifiers & Profiles**.
+2. Register explicit App IDs for the iOS app, monitor, report, iOS widget, Mac
+   app, and Mac widget.
+3. Attach the App Group to all six production identifiers.
+4. Enable Family Controls (Development) for the iOS app, monitor, and report
+   identifiers.
+5. Sign in under Xcode **Settings → Accounts**.
+6. Connect the iPhone or iPad, trust the Mac, and enable Developer Mode on the
+   device.
+7. Run `xcodegen generate`, open `NoiseGate.xcodeproj`, choose the `NoiseGate`
+   scheme and the connected device, then click Run. Screen Time data does not
+   work in the simulator.
 
 NoiseGate targets iOS 17.4 or later so a rule change can rebuild today's
 checkpoint lower bound from past activity instead of presenting a false zero.
 
 Development builds work with the Family Controls capability.  App Store
-distribution requires Apple’s approval for the Family Controls Personal Device
-Usage entitlement.
+and TestFlight distribution require Apple’s approval for the Family Controls
+(Distribution) managed capability on the iOS app, monitor extension, and report
+extension separately. Public distribution also needs a privacy-policy URL in
+App Store Connect and an accessible privacy-policy link inside the app. That
+link is not yet included in NoiseGate.
 
 ## Validate
 
@@ -121,6 +148,7 @@ Run the fast structural audit anywhere Python 3 is available:
 
 ```bash
 python3 Scripts/validate_project.py
+python3 -m unittest discover -s Tests/python
 ```
 
 On a Mac with Xcode:
