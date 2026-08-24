@@ -92,7 +92,7 @@ struct BudgetConfig: Codable, Equatable {
 extension Int {
     /// "1h 05m" style formatting for a value in minutes.
     var asHoursMinutes: String {
-        let value = max(0, self)
+        let value = Swift.max(0, self)
         let h = value / 60, m = value % 60
         if h == 0 { return "\(m)m" }
         return String(format: "%dh %02dm", h, m)
