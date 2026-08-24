@@ -1,3 +1,4 @@
+import Charts
 import SwiftUI
 
 struct MenuView: View {
@@ -50,6 +51,35 @@ struct MenuView: View {
                 Text("Only listed apps are counted. Nothing is blocked.")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NG.inkSoft)
+            }
+
+            if model.weekRecords.count >= 2 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("NOISE · LAST \(model.weekRecords.count) DAYS")
+                        .font(.ngLabel(9))
+                        .tracking(1.5)
+                        .foregroundStyle(NG.inkSoft)
+                    Chart {
+                        ForEach(model.weekRecords) { day in
+                            BarMark(
+                                x: .value("Day", day.date, unit: .day),
+                                y: .value("Minutes", day.noiseMinutes)
+                            )
+                            .foregroundStyle(day.noiseReachedBudget ? NG.alarm : NG.noise)
+                            .cornerRadius(3)
+                        }
+                        RuleMark(y: .value("Budget", model.config.noiseBudgetMinutes))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                            .foregroundStyle(NG.inkSoft)
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .day)) { _ in
+                            AxisValueLabel(format: .dateTime.weekday(.narrow))
+                        }
+                    }
+                    .chartYAxis(.hidden)
+                    .frame(height: 64)
+                }
             }
 
             Divider()
@@ -108,13 +138,32 @@ struct MacSettingsView: View {
                     LabeledContent("Messages", value: model.config.messagesBudgetMinutes.asHoursMinutes)
                 }
             }
+            Section("Notifications") {
+                ForEach(BudgetConfig.nudgePercents, id: \.self) { pct in
+                    Toggle("At \(pct)% of budget", isOn: notifyBinding(pct))
+                }
+                Toggle("Past budget (150% and 200%)", isOn: $model.config.overtimeNotifications)
+            }
+            Section("Menu bar") {
+                Toggle("Show today's noise minutes", isOn: $model.config.showMinutesInMenuBar)
+            }
             Section {
-                Text("Notifications at 50%, 80%, and 100% of each budget, and at 150% and 200% if exceeded — each at most once per day. Time only counts while the Mac is in use; after 2 minutes without input, counting stops. Nothing is blocked.")
+                Text("Each notification is sent at most once per day, per category. Time only counts while the Mac is in use; after 2 minutes without input, counting stops. Nothing is blocked.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func notifyBinding(_ percent: Int) -> Binding<Bool> {
+        Binding(
+            get: { model.config.notifyAt.contains(percent) },
+            set: { on in
+                if on { model.config.notifyAt.insert(percent) }
+                else { model.config.notifyAt.remove(percent) }
+            }
+        )
     }
 }
 

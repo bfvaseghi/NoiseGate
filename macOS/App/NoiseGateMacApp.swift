@@ -13,7 +13,13 @@ struct NoiseGateMacApp: App {
             MenuView()
                 .environmentObject(model)
         } label: {
-            Image(systemName: "waveform.slash")
+            if model.config.showMinutesInMenuBar {
+                // Today's noise minutes at a glance, e.g. "⏦ 23m".
+                Label("\(model.noiseMinutesToday)m", systemImage: "waveform.slash")
+                    .labelStyle(.titleAndIcon)
+            } else {
+                Image(systemName: "waveform.slash")
+            }
         }
         .menuBarExtraStyle(.window)
 

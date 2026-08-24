@@ -29,9 +29,10 @@ project.yml                     XcodeGen spec — SINGLE source of truth for all
                                 6 targets, entitlements, and Info.plists
 Shared/                         Compiled into EVERY target (both platforms).
   AppGroup.swift                App-group id + UserDefaults keys + day keys
-  BudgetConfig.swift            Budgets + threshold percent constants
+  BudgetConfig.swift            Budgets, notification prefs + threshold constants
   NudgeText.swift               ALL notification copy (both platforms)
   UsageSnapshot.swift           Widget-facing daily summary (see "floor" below)
+  HistoryStore.swift            Rolling 30-day DayRecord history (per device)
   DesignSystem.swift            NG tokens: colors, typography, cards, stripes
   BudgetGauge.swift             The budget ring used by apps + widgets
 iOS/
@@ -90,8 +91,20 @@ macOS/
    WhatsApp deliberately untracked unless the user flags them.
 6. **Day rollover** is keyed by `DayKey.today()` (local `yyyy-MM-dd`). On iOS
    the monitor's `intervalDidStart(daily)` resets the snapshot; on Mac
-   `rolloverIfNeeded()` does it. Both must keep working after any storage
-   change.
+   `rolloverIfNeeded()` does it. Both file the finished day into
+   `HistoryStore` *before* resetting (iOS reads the raw stored snapshot, not
+   `loadToday()`, which would already have reset it). Both must keep working
+   after any storage change.
+6b. **Report contexts are string-matched** between the host views and the
+   report extension: "Noise", "Messages", "Noise Week", "Messages Week".
+   The week scenes render exact 7-day Swift Charts inside the privacy
+   sandbox; the host switches context + filter interval via the Today/7 Days
+   range picker. Keep both sides' context strings identical.
+6c. **Notification preferences** live in `BudgetConfig` (`notifyAt`,
+   `overtimeNotifications`) and are checked via `config.notifies(atPercent:)`
+   in BOTH the iOS monitor and the Mac tracker. `BudgetConfig` decodes with
+   `decodeIfPresent` fallbacks so newly added fields never wipe stored
+   budgets — keep that pattern when adding fields.
 7. Restarting monitoring (`stopMonitoring` + `startMonitoring`) resets
    DeviceActivity threshold accumulation mid-day — known Apple quirk. That's
    why `ScreenTimeModel.applyChanges()` persists immediately but debounces

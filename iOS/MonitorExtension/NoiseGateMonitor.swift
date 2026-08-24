@@ -12,7 +12,22 @@ class NoiseGateMonitor: DeviceActivityMonitor {
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
         guard activity.rawValue == "daily" else { return }
-        // A new day: reset the widget snapshot.
+
+        // File the finished day into history before resetting. Read the raw
+        // stored snapshot — loadToday() would already have reset it.
+        if let previous = AppGroup.defaults.codable(UsageSnapshot.self, forKey: StoreKey.usageSnapshot),
+           previous.dayKey != DayKey.today() {
+            HistoryStore.record(DayRecord(
+                dayKey: previous.dayKey,
+                noiseMinutes: previous.noiseMinutes,
+                messagesMinutes: previous.messagesMinutes,
+                noiseBudgetMinutes: previous.noiseBudgetMinutes,
+                messagesBudgetMinutes: previous.messagesBudgetMinutes,
+                isFloor: true
+            ))
+        }
+
+        // A new day: reset the widget snapshot and the nudge ledger.
         let config = BudgetConfig.load()
         var snap = UsageSnapshot()
         snap.noiseBudgetMinutes = config.noiseBudgetMinutes
@@ -45,7 +60,8 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
 
-        guard let text = NudgeText.notification(kind: kind, percent: percent,
+        guard config.notifies(atPercent: percent),
+              let text = NudgeText.notification(kind: kind, percent: percent,
                                                 budgetMinutes: budget) else { return }
 
         // Once per day per milestone, even if a mid-day monitoring restart

@@ -19,6 +19,7 @@ enum StoreKey {
     static let mutedNoise = "mutedNoise"            // MutedTokens JSON (iOS) — paused noise apps
     static let mutedMessages = "mutedMessages"      // MutedTokens JSON (iOS)
     static let iosNudgesSent = "iosNudgesSent"      // [String] nudge ids sent today (iOS)
+    static let usageHistory = "usageHistory"        // [DayRecord] JSON — finished days
     static let macNoiseApps = "macNoiseApps"        // [String] bundle ids (macOS)
     static let macMessagesApps = "macMessagesApps"  // [String] bundle ids (macOS)
     static let macLedger = "macLedger"              // MacLedger JSON (macOS)
@@ -40,6 +41,11 @@ enum DayKey {
     /// Local-timezone day key, e.g. "2026-08-24". Everything resets when it changes.
     static func today(_ date: Date = Date()) -> String {
         formatter.string(from: date)
+    }
+
+    /// Inverse of `today(_:)` — midnight local time for a stored day key.
+    static func date(from dayKey: String) -> Date? {
+        formatter.date(from: dayKey)
     }
 }
 

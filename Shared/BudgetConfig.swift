@@ -7,13 +7,37 @@ struct BudgetConfig: Codable, Equatable {
     var noiseBudgetMinutes: Int = 45
     /// Daily budget for Messages, in minutes. Tracked separately.
     var messagesBudgetMinutes: Int = 60
+    /// Which budget milestones send a notification (subset of `nudgePercents`).
+    var notifyAt: Set<Int> = [50, 80, 100]
+    /// Whether the 150% / 200% past-budget notifications are sent.
+    var overtimeNotifications: Bool = true
+    /// macOS: show today's noise minutes next to the menu-bar icon.
+    var showMinutesInMenuBar: Bool = false
 
-    /// Percentages of a budget at which a nudge notification is sent.
+    /// Percentages of a budget at which a nudge notification can be sent.
     static let nudgePercents: [Int] = [50, 80, 100]
     /// Percent steps used for threshold events, which also drive widget progress.
     static let progressPercents: [Int] = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
-    /// Two gentle check-ins past 100%, in case the day got away from you.
+    /// Two check-ins past 100%, sent only while `overtimeNotifications` is on.
     static let overtimePercents: [Int] = [150, 200]
+
+    init() {}
+
+    /// Tolerant decoding: fields added in later versions fall back to their
+    /// defaults instead of discarding the user's stored budgets.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        noiseBudgetMinutes = try c.decodeIfPresent(Int.self, forKey: .noiseBudgetMinutes) ?? 45
+        messagesBudgetMinutes = try c.decodeIfPresent(Int.self, forKey: .messagesBudgetMinutes) ?? 60
+        notifyAt = try c.decodeIfPresent(Set<Int>.self, forKey: .notifyAt) ?? [50, 80, 100]
+        overtimeNotifications = try c.decodeIfPresent(Bool.self, forKey: .overtimeNotifications) ?? true
+        showMinutesInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showMinutesInMenuBar) ?? false
+    }
+
+    /// Whether a given threshold percent should produce a notification.
+    func notifies(atPercent percent: Int) -> Bool {
+        percent > 100 ? overtimeNotifications : notifyAt.contains(percent)
+    }
 
     static func load() -> BudgetConfig {
         AppGroup.defaults.codable(BudgetConfig.self, forKey: StoreKey.budgetConfig) ?? BudgetConfig()

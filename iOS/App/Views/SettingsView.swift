@@ -25,21 +25,31 @@ struct SettingsView: View {
                     caption: "Daily limit for Messages, tracked separately."
                 ) { adjust(\.messagesBudgetMinutes, by: $0) }
 
-                HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: "bell.badge")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(NG.focus, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 14) {
+                        Image(systemName: "bell.badge")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(NG.focus, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         Text("Notifications")
                             .font(.system(size: 15.5, weight: .bold))
                             .foregroundStyle(NG.ink)
-                        Text("Sent at 50%, 80%, and 100% of each budget, and at 150% and 200% if exceeded — each at most once per day. Nothing is blocked.")
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(NG.inkSoft)
+                        Spacer()
                     }
-                    Spacer()
+                    ForEach(BudgetConfig.nudgePercents, id: \.self) { pct in
+                        Toggle("At \(pct)% of budget", isOn: notifyBinding(pct))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(NG.ink)
+                            .tint(NG.focus)
+                    }
+                    Toggle("Past budget (150% and 200%)", isOn: $model.config.overtimeNotifications)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(NG.ink)
+                        .tint(NG.focus)
+                    Text("Each notification is sent at most once per day, per category. Nothing is blocked.")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(NG.inkSoft)
                 }
                 .ngCard(padding: 16)
 
@@ -54,6 +64,16 @@ struct SettingsView: View {
         .onChange(of: model.config) { _, _ in
             model.applyChanges()
         }
+    }
+
+    private func notifyBinding(_ percent: Int) -> Binding<Bool> {
+        Binding(
+            get: { model.config.notifyAt.contains(percent) },
+            set: { on in
+                if on { model.config.notifyAt.insert(percent) }
+                else { model.config.notifyAt.remove(percent) }
+            }
+        )
     }
 
     private func adjust(_ keyPath: WritableKeyPath<BudgetConfig, Int>, by delta: Int) {

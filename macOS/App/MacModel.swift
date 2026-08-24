@@ -132,11 +132,34 @@ final class MacModel: ObservableObject {
 
     private func rolloverIfNeeded() {
         guard ledger.dayKey != DayKey.today() else { return }
+        // File the finished day into history before resetting.
+        HistoryStore.record(DayRecord(
+            dayKey: ledger.dayKey,
+            noiseMinutes: noiseMinutesToday,
+            messagesMinutes: messagesMinutesToday,
+            noiseBudgetMinutes: config.noiseBudgetMinutes,
+            messagesBudgetMinutes: config.messagesBudgetMinutes,
+            isFloor: false
+        ))
         ledger = MacLedger()
         ledger.save()
         AppGroup.defaults.set([String](), forKey: StoreKey.macNudgesSent)
         recomputeTotals()
         publishSnapshot()
+    }
+
+    /// The last 6 finished days plus today, oldest first — for the menu chart.
+    var weekRecords: [DayRecord] {
+        var records = HistoryStore.lastDays(6)
+        records.append(DayRecord(
+            dayKey: ledger.dayKey,
+            noiseMinutes: noiseMinutesToday,
+            messagesMinutes: messagesMinutesToday,
+            noiseBudgetMinutes: config.noiseBudgetMinutes,
+            messagesBudgetMinutes: config.messagesBudgetMinutes,
+            isFloor: false
+        ))
+        return records
     }
 
     private func persistIfDue() {
@@ -182,7 +205,8 @@ final class MacModel: ObservableObject {
         guard budget > 0 else { return }
         let percents = BudgetConfig.nudgePercents + BudgetConfig.overtimePercents
         for pct in percents where minutes * 100 >= budget * pct {
-            guard let text = NudgeText.notification(kind: kind, percent: pct,
+            guard config.notifies(atPercent: pct),
+                  let text = NudgeText.notification(kind: kind, percent: pct,
                                                     budgetMinutes: budget) else { continue }
             notifyOnce(id: "\(kind).\(pct)", title: text.title, body: text.body)
         }

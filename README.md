@@ -29,9 +29,18 @@ belongs to a dedicated blocking app.
   Pause Hinge for a week without losing your list; flip it back on later.
 - **Messages on its own line.** A separate budget and gauge for the Messages
   app, so thread time doesn't blur into feed time.
-- **Threshold notifications.** A notification at 50%, 80%, and 100% of each
-  budget, and at 150% / 200% if exceeded. Each fires at most once per day,
-  at standard priority, with neutral, factual copy.
+- **Threshold notifications, your choice of thresholds.** A notification at
+  50%, 80%, and 100% of each budget, and at 150% / 200% if exceeded — each
+  toggleable in settings, each fired at most once per day, at standard
+  priority, with neutral, factual copy.
+- **Today and 7-day views.** Exact daily totals and top apps for today, plus
+  an exact 7-day bar chart per category (rendered inside Apple's
+  privacy-preserving report extension) with the budget line drawn in.
+- **History stats.** A rolling 30-day per-day record powers a "budget reached
+  on N of the last 7 days" card on iOS and a 7-day mini chart in the Mac
+  menu popover.
+- **Menu-bar readout (Mac).** Optionally show today's noise minutes right in
+  the menu bar.
 - **Widgets everywhere.** Budget rings on the iPhone/iPad home screen and
   lock screen, and on the Mac desktop / Notification Center.
 - **iPhone, iPad, and Mac.** One iOS app for iPhone and iPad; a menu-bar
