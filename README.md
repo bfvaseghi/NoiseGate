@@ -13,7 +13,13 @@ NoiseGate keeps only two explicit ledgers:
 2. **Messages** for conversation time, kept separate.
 
 Everything else is excluded.  That excluded activity is the noise NoiseGate
-removes.  NoiseGate never blocks, hides, or closes an app.
+removes.
+
+**NoiseGate never blocks, hides, or closes an app — by design, not by
+omission.**  It exists to measure the time you give to apps you have decided
+are distracting, so you can see the number and judge it yourself.  Blocking
+is a different job for a different app.  The build fails if restriction APIs
+are ever added.
 
 ## Product principles
 

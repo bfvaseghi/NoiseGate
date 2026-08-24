@@ -5,19 +5,32 @@ meaning, Apple’s privacy boundary, and the user’s historical data.
 
 ## Product definition
 
-NoiseGate is a personalized screen-time tracker for iPhone, iPad, and Mac.
-It has exactly two visible ledgers:
+**The purpose, in the owner's words: track the screen time spent on
+legitimately distracting apps — the ones there is no good reason to be
+spending that much time on. Not to block them.**
 
-- **Distractions**: individual apps and sites the user explicitly selects.
-- **Messages**: messaging apps, tracked separately.
+Everything below serves that sentence. NoiseGate is a personalized
+screen-time tracker for iPhone, iPad, and Mac with exactly two visible
+totals:
+
+- **Distractions**: individual apps and sites the owner explicitly selects.
+- **Messages**: messaging apps, kept on a separate total.
 
 “Noise” does **not** mean distracting apps.  Noise is the useful or neutral
 activity Apple Screen Time includes but this product intentionally excludes.
 Maps, reading, FaceTime, work apps, and every other unselected activity stay
-invisible.
+invisible.  Apple's number is meaningless because it counts everything; this
+one is meaningful because it counts only what the owner said to count.
 
 NoiseGate is observation only.  Never add shields, app hiding, termination,
-enforcement, or blocking.  A separate app handles blocking.
+enforcement, or blocking — not as an option, not behind a setting, not
+"just in case".  A separate app the owner already uses handles blocking.
+`Scripts/validate_project.py` fails the build if any restriction API
+appears, so this is a mechanical rule, not an aspiration.
+
+The budgets, notifications, and charts exist to answer one question —
+*am I spending more time on this than I want to?* — and then stop.  The
+app's job ends at telling the truth about the number.
 
 User-facing copy is neutral and factual.  State the ledger, number, threshold,
 and reset.  Do not praise, scold, joke, use exclamation points, or request

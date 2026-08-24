@@ -189,9 +189,35 @@ for shared_path in (ROOT / "Shared").glob("*.swift"):
             f"{shared_path.relative_to(ROOT)} imports platform-only {forbidden}",
         )
 
+# NoiseGate measures time on apps the owner chose to watch. It never
+# intervenes. This is the product's whole reason to exist — a separate app
+# does blocking — so the ban is mechanical rather than a note in a doc.
+# ManagedSettings may still be imported: ApplicationToken and WebDomainToken
+# are declared there, and naming an app is not restricting it.
 swift = "\n".join(path.read_text(encoding="utf-8") for path in ROOT.rglob("*.swift"))
-for forbidden in ("ManagedSettingsStore(", ".shield.applications", "forceTerminate()"):
-    require(forbidden not in swift, f"Observation-only invariant violated by {forbidden!r}")
+for forbidden in (
+    "ManagedSettingsStore(",          # the only handle that can restrict anything
+    ".shield.applications",
+    ".shield.applicationCategories",
+    ".shield.webDomains",
+    "ShieldConfiguration",
+    "ShieldActionDelegate",
+    "forceTerminate()",
+    ".hide()",                        # AppKit: hiding another app is enforcement
+    "denyAppRemoval",
+    "denyAppInstallation",
+):
+    require(
+        forbidden not in swift,
+        f"NoiseGate observes only; {forbidden!r} would restrict or hide an app",
+    )
+
+# The same promise on the packaging side: no shield-UI extension point, and
+# no entitlement beyond Family Controls (read) and the App Group.
+require(
+    "ManagedSettingsUI" not in project and "shield-configuration" not in project,
+    "project.yml declares a shield extension point",
+)
 
 contexts = {
     'Self("Distractions")',
