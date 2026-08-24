@@ -1,143 +1,233 @@
 # AGENTS.md — working on NoiseGate
 
-Guidance for AI coding agents (ChatGPT/Codex, Claude, Copilot, etc.) and new
-contributors. Read this before touching anything.
+Read this before changing the project.  These rules protect the product’s
+meaning, Apple’s privacy boundary, and the user’s historical data.
 
-## What this app is
+## Product definition
 
-NoiseGate is a personalized screen-time tracker for iPhone, iPad, and Mac. It
-watches ONLY two user-chosen lists — "noise" apps (the distracting ones:
-dating apps, feeds) and Messages — and is blind to everything else on the
-device (news, maps, FaceTime, WhatsApp, work apps). Each flagged app has a
-per-app toggle: tracked or paused, without losing the list.
+NoiseGate is a personalized screen-time tracker for iPhone, iPad, and Mac.
+It has exactly two visible ledgers:
 
-**NoiseGate never blocks anything.** The user has a separate blocking app;
-this one is observation only — budgets, gauges, and threshold notifications.
-Do not add shields, enforcement, hiding of apps, or blocking of any kind.
-That is a product decision, not a missing feature.
+- **Distractions**: individual apps and sites the user explicitly selects.
+- **Messages**: messaging apps, tracked separately.
 
-**Tone is neutral and factual.** All user-facing copy states numbers and
-facts, nothing more ("Noise: 80% of budget used. About 9m remaining today.").
-No praise, no scolding, no jokes, no exclamation points, no time-sensitive/
-critical interruption levels. All notification copy lives in
-`Shared/NudgeText.swift` — both platforms use it; edit copy there only.
+“Noise” does **not** mean distracting apps.  Noise is the useful or neutral
+activity Apple Screen Time includes but this product intentionally excludes.
+Maps, reading, FaceTime, work apps, and every other unselected activity stay
+invisible.
 
-## Repo map
+NoiseGate is observation only.  Never add shields, app hiding, termination,
+enforcement, or blocking.  A separate app handles blocking.
 
-```
-project.yml                     XcodeGen spec — SINGLE source of truth for all
-                                6 targets, entitlements, and Info.plists
-Shared/                         Compiled into EVERY target (both platforms).
-  AppGroup.swift                App-group id + UserDefaults keys + day keys
-  BudgetConfig.swift            Budgets, notification prefs + threshold constants
-  NudgeText.swift               ALL notification copy (both platforms)
-  UsageSnapshot.swift           Widget-facing daily summary (see "floor" below)
-  HistoryStore.swift            Rolling 30-day DayRecord history (per device)
-  DesignSystem.swift            NG tokens: colors, typography, cards, stripes
-  BudgetGauge.swift             The budget ring used by apps + widgets
+User-facing copy is neutral and factual.  State the ledger, number, threshold,
+and reset.  Do not praise, scold, joke, use exclamation points, or request
+critical or time-sensitive notification priority.  Notification copy belongs
+only in `Shared/NudgeText.swift`.
+
+## Repository map
+
+```text
+project.yml                     XcodeGen source of truth for all targets
+Shared/
+  AppGroup.swift                App-group identifiers and stable storage keys
+  SharedStore.swift             Process lock + cross-process flock persistence
+  PrivacyInfo.xcprivacy         Required-reason declaration for UserDefaults
+  BudgetConfig.swift            Budgets, notification choices, v1 migration
+  UsageSnapshot.swift           Widget feed and v1 migration
+  HistoryStore.swift            Rolling 30-day records and v1 migration
+  NudgeText.swift               All iPhone and Mac notification copy
+  DesignSystem.swift            Adaptive visual tokens
+  BudgetGauge.swift             Shared accessible ring
 iOS/
-  App/                          SwiftUI app (custom tab shell: Today/Noise/Budgets)
-  ScreenTimeShared/             FamilyControls selection + muted-token store —
-                                iOS app and monitor targets ONLY (needs entitlement)
-  MonitorExtension/             DeviceActivityMonitor: thresholds → gentle nudges
-  ReportExtension/              DeviceActivityReport: renders exact usage (sandboxed)
-  Widget/                       WidgetKit widget (home + lock screen)
+  App/                          SwiftUI app: Today / Apps / Budgets
+  ScreenTimeShared/             Selection safety and event-name contract
+  MonitorExtension/             Threshold callbacks, floors, and nudges
+  ReportExtension/              Exact private reports and charts
+  Widget/                       Home Screen and Lock Screen widget
 macOS/
-  App/                          Menu-bar app: frontmost-app tracker + nudges
-  Widget/                       macOS widget
+  App/                          Menu-bar tracker and settings
+  Widget/                       Mac widget
+Tests/                          Migration and ledger regression tests
+Scripts/validate_project.py     Cross-platform invariant audit
+Design/                         Vector reference and production icon renderer
 ```
 
-## Build & validate
+## Build and validate
 
-- The Xcode project is **generated**: `brew install xcodegen && xcodegen generate`,
-  then build the `NoiseGate` (iOS) and `NoiseGateMac` schemes.
-- `NoiseGate.xcodeproj` is gitignored. **Never hand-edit or commit it**; change
-  `project.yml` and regenerate. Target membership = the `sources` lists there.
-- No unit tests yet. Validation = both schemes compile + manual run. Screen
-  Time behavior **cannot** be exercised in the iOS simulator or CI; it needs a
-  real device with the Family Controls capability.
-- Placeholders that must stay in sync: bundle prefix `com.example.noisegate`
-  and team `YOURTEAMID` in `project.yml`; app group `group.com.example.noisegate`
-  in BOTH `project.yml` (all targets) and `Shared/AppGroup.swift`.
+```bash
+python3 Scripts/validate_project.py
+brew install xcodegen
+xcodegen generate
+open NoiseGate.xcodeproj
+```
 
-## Architecture rules (things that will break subtly if ignored)
+Build the `NoiseGate` and `NoiseGateMac` schemes.  Run `NoiseGateTests` and
+`NoiseGateMacTests`.  Screen Time behavior requires a physical iPhone or iPad.
 
-1. **`Shared/` compiles everywhere** — Foundation + SwiftUI only. No
-   FamilyControls/ManagedSettings/DeviceActivity/AppKit-only imports there;
-   the widget targets have no Family Controls entitlement. iOS Screen Time
-   code goes in `iOS/ScreenTimeShared/`.
-2. **Data flow on iOS is one-way and privacy-bounded.** Exact usage numbers
-   exist only inside the Report extension's view (Apple's privacy wall — they
-   cannot be exported to the app, the widget, or a server). The widget shows a
-   **floor**: the monitor extension writes `UsageSnapshot` minutes equal to the
-   highest crossed threshold (10% steps of the budget). Fields are labeled
-   `isFloor` and rendered with "≥". Never present floor values as exact.
-3. **Muted tokens = paused, not deleted.** `SelectionStore` keeps each
-   selection plus a `MutedTokens` set. Monitoring events and report filters are
-   built from the *active* sets (`ScreenTimeModel.activeNoiseApps` etc.), so a
-   paused app is invisible to tracking. `applyChanges()` prunes muted tokens
-   no longer in the selection. The tokens are opaque; UI renders them with
-   `Label(token)`, which shows the real name/icon via the system.
-4. **Threshold events encode meaning in their names**: `"noise.p80"` =
-   noise budget 80% crossed; `"msg.p150"` = messages 150%. Parsing lives in
-   the monitor extension (`components(separatedBy: ".p")`). Percent lists come
-   from `BudgetConfig.progressPercents` / `.overtimePercents`; keep the app's
-   event registration (`ScreenTimeModel.restartMonitoring`) and the monitor's
-   handling in sync if you change them.
-5. **The Mac app has no Screen Time API** — it samples the frontmost app every
-   5s while input is recent (<2 min idle) and counts only flagged bundle ids.
-   Both Mac targets are sandboxed. Default messaging bundle ids are Apple
-   Messages only (`com.apple.MobileSMS` / `com.apple.iChat`) — FaceTime and
-   WhatsApp deliberately untracked unless the user flags them.
-6. **Day rollover** is keyed by `DayKey.today()` (local `yyyy-MM-dd`). On iOS
-   the monitor's `intervalDidStart(daily)` resets the snapshot; on Mac
-   `rolloverIfNeeded()` does it. Both file the finished day into
-   `HistoryStore` *before* resetting (iOS reads the raw stored snapshot, not
-   `loadToday()`, which would already have reset it). CRITICAL:
-   `intervalDidStart` ALSO fires on every mid-day monitoring restart (any
-   settings/toggle change) — it must return early when the stored snapshot's
-   dayKey is already today, or it wipes the day's floor and nudge ledger.
-6b. **Report contexts are string-matched** between the host views and the
-   report extension: "Noise", "Messages", "Noise Week", "Messages Week".
-   The week scenes render exact 7-day Swift Charts inside the privacy
-   sandbox; the host switches context + filter interval via the Today/7 Days
-   range picker. Keep both sides' context strings identical.
-6c. **Notification preferences** live in `BudgetConfig` (`notifyAt`,
-   `overtimeNotifications`) and are checked via `config.notifies(atPercent:)`
-   in BOTH the iOS monitor and the Mac tracker. `BudgetConfig` decodes with
-   `decodeIfPresent` fallbacks so newly added fields never wipe stored
-   budgets — keep that pattern when adding fields.
-7. Restarting monitoring (`stopMonitoring` + `startMonitoring`) resets
-   DeviceActivity threshold accumulation mid-day — known Apple quirk. That's
-   why `ScreenTimeModel.applyChanges()` persists immediately but defers the
-   expensive side effects (`syncDeferred()`: snapshot write + widget reload +
-   restart) behind a 0.8s debounce, so rapid stepper taps or toggle flips
-   coalesce into one sync. Don't add undebounced restart/reload paths.
-   DeviceActivityReport filters must also stay value-stable across renders
-   (day-boundary interval ends, never `.now`) or the report re-queries on
-   every SwiftUI body evaluation.
-8. Notifications fire at most once per day per milestone, enforced by
-   sent-key ledgers (`iosNudgesSent` / `macNudgesSent`), which also covers
-   thresholds re-firing after a mid-day monitoring restart. The daily reset
-   clears both. Keep that dedupe when touching notification code.
+`NoiseGate.xcodeproj` is generated and gitignored.  Never hand-edit or commit
+it.  Change `project.yml` instead.
 
-## Design system (UI work)
+Keep the placeholders synchronized until the owner replaces them:
 
-- All colors/typography come from `Shared/DesignSystem.swift` (`NG.*` tokens,
-  `Font.ngDisplay/ngNumber/ngLabel`). **No raw color or font literals in
-  views.** Light/dark is handled inside the tokens.
-- Visual language: warm paper ground; orange = noise, teal = messages; alarm
-  red appears only as an accent for the over-budget state. Condensed-black
-  caps for display type, heavy rounded for numerals, tracked small caps for
-  labels, `.ngCard()` surfaces.
-- Copy voice: neutral and factual everywhere (see the tone rule at the top).
-  State what is tracked, the numbers, and that nothing is blocked.
+- Team: `YOURTEAMID`
+- Bundle prefix: `com.example.noisegate`
+- App Group: `group.com.example.noisegate` in `project.yml` and
+  `Shared/AppGroup.swift`
+
+## Non-negotiable architecture rules
+
+### 1. Keep shared code platform-safe
+
+`Shared/` compiles into every target.  Foundation, SwiftUI, and Darwin are
+allowed.  FamilyControls, DeviceActivity, ManagedSettings, and AppKit code must
+remain in platform folders.
+
+### 2. Respect Apple’s privacy wall
+
+Exact iPhone usage exists only inside `NoiseGateReport`.  It cannot be written
+to UserDefaults, exported to the host, sent to a server, or displayed by a
+normal widget.  The iPhone widget uses the highest crossed threshold as a lower
+bound and must display `≥` or “at least.”  Never present it as exact.
+
+Device reports must stay scoped to the current device type.  Do not restore a
+combined `.iPhone + .iPad` filter.
+
+### 3. Keep selections narrow
+
+The Family Activity pickers start with
+`FamilyActivitySelection(includeEntireCategory: false)`.  Whole categories are
+rejected.  A legacy selection containing a category is reset because Apple may
+already have expanded it into app and domain tokens that cannot be separated
+from explicit choices later.
+
+Messages is app-only.  Its categories and domains are rejected. Effective
+Distractions tokens always subtract every selected Messages token, including
+paused ones. Pausing Messages makes it invisible rather than moving it into
+Distractions. Never pass an
+empty selection into a `DeviceActivityFilter` or empty events into monitoring
+without first guarding it.  Empty can mean all activity in Apple APIs.
+
+Paused tokens remain in the picker selection and are excluded from events and
+reports.  Prune only paused tokens no longer present in the selection.  Do not
+claim iOS pause is an accrual boundary.  Apple’s report applies the current
+filter to the day, so resuming an app can include its earlier same-day usage.
+
+### 4. Keep the event contract synchronized
+
+Event names are versioned and generation-scoped, such as
+`v3.g4.distractions.b45.m36.p80` and `v3.g4.msg.b60.m90.p150`. The app creates
+them and the monitor accepts only the active generation. Each callback carries
+its scheduled budget and exact threshold floor. This prevents a delayed event
+from borrowing mutable settings or changing the new ledger.
+
+Threshold minutes round **up**. Events use `includesPastActivity: true` so a
+safe reconfiguration can rebuild today’s checkpoint floor. The iOS 17.4
+deployment floor exists to keep that behavior truthful.
+
+The daily schedule ends at `23:59:59`.  Do not reintroduce a one-minute gap.
+`intervalDidStart` also fires on a mid-day restart. If the stored snapshot is
+already from today, preserve its floors and nudge ledger. Only repair the
+active flag if the host exited between starting monitoring and publishing it.
+
+### 5. Reconfiguration must survive process death
+
+Selection, pause, and budget changes persist immediately.  DeviceActivity
+restarts are debounced because every restart is expensive.  The
+`monitoringNeedsReconfigure` flag stays true until the replacement schedule
+starts successfully.  This ensures closing the app during the debounce cannot
+leave old rules active forever.
+
+Notification preference changes persist without restarting DeviceActivity or
+clearing today’s floor.
+
+Keep report filters value-stable across SwiftUI renders. Seven-day intervals
+end at the next day boundary, not `.now`, so a timer-driven view refresh does
+not force the report extension to query Screen Time again.
+
+### 6. Preserve once-per-day nudges
+
+The `iosNudgesSent` and `macNudgesSent` ledgers deduplicate every milestone by
+ledger, percent, and day. Read-modify-write through `SharedStore`. Direct
+UserDefaults mutations can race across an app, extension, and widget.
+
+For two minutes after an iOS reconfiguration, includes-past-activity callbacks
+may rebuild widget floors but must not produce catch-up notifications.  This
+prevents several old milestones from appearing as a burst.
+
+The Mac sends only the highest newly crossed milestone if several become true
+at once.  This prevents a notification burst after launch or a budget change.
+Mirror sent Mac milestone IDs in memory so an already-fired threshold does not
+lock and read the app-group store on every five-second checkpoint.
+
+### 7. Never rewrite Mac history by reclassification
+
+`MacLedger` has separate dictionaries for Distractions and Messages.  Time is
+classified when it accrues.  Current app selections must never be used to
+recompute old seconds.
+
+The decoder migrates the v1 `seconds` dictionary once, using Messages-first
+classification. Mac selections persist as one `MacSelections` value so a move
+between ledgers cannot be half-written. A stale ledger is filed into history
+before a new day is created, including when the app was not running at midnight.
+
+Checkpoint on foreground-app changes.  Pause on session lock and sleep.  Cap a
+single elapsed checkpoint so wake or debugger gaps cannot become tracked time.
+Persist at least every 15 seconds and flush on termination.
+Publish observable totals at whole-minute granularity. Keep the widget feed
+alive with a lightweight 30-second heartbeat, and reload its timeline only
+when visible values change or an explicit state transition requires it.
+
+### 8. Preserve historical targets
+
+Every `DayRecord` stores the budgets that applied to that day.  Charts compare
+each historical record against its own stored target, not today’s target.
+Changing today’s budget must not rewrite past records.
+
+File the previous snapshot or ledger before resetting it.  Filter today out of
+finished history before appending the live record so a day cannot be counted
+twice.
+
+### 9. Keep report contexts exact
+
+The host and report extension string-match these four contexts:
+
+- `Distractions`
+- `Messages`
+- `Distractions Week`
+- `Messages Week`
+
+The weekly report must zero-fill all seven calendar days and divide the average
+by seven, not only by days that had usage.
+
+### 10. Keep persistence atomic and migrations tolerant
+
+Use `SharedStore` for App Group data.  Its `NSLock` protects threads and its
+Darwin `flock` protects processes.  Use `update` or `updateStringSet` for every
+read-modify-write operation.
+
+New Codable fields require `decodeIfPresent` defaults.  Do not remove legacy
+decode keys until a deliberate migration horizon is documented.  Existing
+v1 `noise*`, selection, pause, snapshot, history, and Mac ledger values must
+continue to load.
+
+## Design rules
+
+- Use `NG.*` colors and `Font.ng*` typography.  Do not add raw view colors.
+- Orange (`NG.distraction`) means Distractions.  Teal means Messages.  Red is
+  reserved for the brand and reached-budget state.
+- Respect Reduce Motion.  Every visual gauge needs a combined accessibility
+  label and value.
+- `Design/NoiseGateIcon.svg` is the editable vector reference, and
+  `Design/render_icon.py` is the deterministic production renderer. Keep their
+  geometry and colors synchronized. Committed PNGs must remain opaque RGB and
+  match their asset-catalog dimensions.
+- Keep the interface calm, legible, and specific.  “Everything else is
+  excluded as noise” is the core promise.
 
 ## Conventions
 
-- Swift 5.9, SwiftUI, iOS 17+ / macOS 14+, zero third-party dependencies —
-  keep it that way unless explicitly asked.
-- 4-space indent, `// MARK:` sections, doc comments explain *why* and
-  platform constraints, not what the next line does.
-- Commit messages: imperative summary line, body explains behavior changes.
-  Do not commit `NoiseGate.xcodeproj`, `DerivedData`, or `.DS_Store`.
+- Swift 5 language mode, SwiftUI, iOS 17.4+, macOS 14+, and no runtime dependencies.
+- Four-space indentation and `// MARK:` sections.
+- Comments explain privacy, migration, or platform constraints.
+- Commit messages use an imperative subject and a body that explains behavior.
+- Do not commit `.DS_Store`, DerivedData, or `NoiseGate.xcodeproj`.

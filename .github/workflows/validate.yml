@@ -1,0 +1,42 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  structural:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python3 Scripts/validate_project.py
+
+  apple-builds:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Build iPhone app and extensions
+        run: >-
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGate
+          -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Run iPhone model tests
+        run: >-
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGate
+          -sdk iphonesimulator
+          -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16 Pro'
+          CODE_SIGNING_ALLOWED=NO test
+      - name: Build Mac app and widget
+        run: >-
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGateMac
+          -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Run model tests
+        run: >-
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGateMac
+          -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO test

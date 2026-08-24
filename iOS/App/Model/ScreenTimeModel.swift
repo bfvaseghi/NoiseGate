@@ -1,50 +1,53 @@
-import Foundation
-import SwiftUI
-import FamilyControls
-import ManagedSettings
 import DeviceActivity
+import FamilyControls
+import Foundation
+import ManagedSettings
+import SwiftUI
 import UserNotifications
 import WidgetKit
 
-extension DeviceActivityName {
-    /// All-day monitoring window carrying the budget threshold events.
-    static let daily = Self("daily")
-}
-
-/// Event names encode category + percent so the monitor extension can decode
-/// them without extra state: "noise.p80" = noise budget reached 80%.
-enum ThresholdEvent {
-    static func name(kind: String, percent: Int) -> DeviceActivityEvent.Name {
-        DeviceActivityEvent.Name("\(kind).p\(percent)")
-    }
-}
-
 @MainActor
 final class ScreenTimeModel: ObservableObject {
-    @Published var noiseSelection: FamilyActivitySelection = SelectionStore.noise()
-    @Published var messagesSelection: FamilyActivitySelection = SelectionStore.messages()
-    @Published var mutedNoise: MutedTokens = SelectionStore.mutedNoise()
-    @Published var mutedMessages: MutedTokens = SelectionStore.mutedMessages()
-    @Published var config: BudgetConfig = BudgetConfig.load()
-    @Published var isAuthorized: Bool = AuthorizationCenter.shared.authorizationStatus == .approved
+    @Published var distractionSelection = SelectionStore.distractions()
+    @Published var messagesSelection = SelectionStore.messages()
+    @Published var pausedDistractions = SelectionStore.pausedDistractions()
+    @Published var pausedMessages = SelectionStore.pausedMessages()
+    @Published var config = BudgetConfig.load()
+    @Published private(set) var authorizationStatus =
+        AuthorizationCenter.shared.authorizationStatus
+    @Published private(set) var notificationStatus: UNAuthorizationStatus = .notDetermined
     @Published var lastError: String?
 
     private let center = DeviceActivityCenter()
+    private let store = SharedStore.shared
     private var restartTask: Task<Void, Never>?
 
-    // MARK: - Active (non-muted) token sets
+    init() {
+        if store.bool(forKey: StoreKey.selectionMigrationNoticePending) {
+            store.saveBool(false, forKey: StoreKey.selectionMigrationNoticePending)
+            lastError = "NoiseGate removed a legacy whole-category choice because it could include useful activity. Choose the individual apps you want to track again."
+        }
+    }
 
-    var activeNoiseApps: Set<ApplicationToken> {
-        noiseSelection.applicationTokens.subtracting(mutedNoise.applications)
-    }
-    var activeNoiseCategories: Set<ActivityCategoryToken> {
-        noiseSelection.categoryTokens.subtracting(mutedNoise.categories)
-    }
+    var isAuthorized: Bool { authorizationStatus == .approved }
+
+    // MARK: - Effective token sets
+
     var activeMessagesApps: Set<ApplicationToken> {
-        messagesSelection.applicationTokens.subtracting(mutedMessages.applications)
+        messagesSelection.applicationTokens.subtracting(pausedMessages.applications)
     }
-    var activeMessagesCategories: Set<ActivityCategoryToken> {
-        messagesSelection.categoryTokens.subtracting(mutedMessages.categories)
+
+    /// Messages always wins if the same opaque app token appears in both
+    /// lists, even while its Messages row is paused. Pausing therefore makes
+    /// the app invisible instead of silently moving it into Distractions.
+    var activeDistractionApps: Set<ApplicationToken> {
+        distractionSelection.applicationTokens
+            .subtracting(pausedDistractions.applications)
+            .subtracting(messagesSelection.applicationTokens)
+    }
+
+    var activeDistractionWebDomains: Set<WebDomainToken> {
+        distractionSelection.webDomainTokens.subtracting(pausedDistractions.webDomains)
     }
 
     // MARK: - Authorization
@@ -52,129 +55,334 @@ final class ScreenTimeModel: ObservableObject {
     func requestAuthorization() async {
         do {
             try await AuthorizationCenter.shared.requestAuthorization(for: .individual)
-            isAuthorized = true
-            _ = try? await UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound, .badge])
-            applyChanges()
+            authorizationStatus = AuthorizationCenter.shared.authorizationStatus
+            guard isAuthorized else {
+                pauseForRevokedAuthorization()
+                return
+            }
+            if config.notificationsEnabled {
+                await requestNotificationAuthorization()
+            }
+            applyTrackingChanges()
         } catch {
-            lastError = "Screen Time permission was not granted: \(error.localizedDescription)"
+            authorizationStatus = AuthorizationCenter.shared.authorizationStatus
+            pauseForRevokedAuthorization()
+            lastError = "Screen Time access was not granted. Check Settings › Screen Time › Apps with Screen Time Access, then try again."
         }
     }
 
-    // MARK: - Per-app toggles (paused, not deleted)
+    func refreshAuthorization() async {
+        authorizationStatus = AuthorizationCenter.shared.authorizationStatus
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        notificationStatus = settings.authorizationStatus
 
-    func setNoiseApp(_ token: ApplicationToken, tracked: Bool) {
-        if tracked { mutedNoise.applications.remove(token) }
-        else { mutedNoise.applications.insert(token) }
-        applyChanges()
+        if notificationStatus == .denied && config.notificationsEnabled {
+            config.notificationsEnabled = false
+            savePreferences()
+        }
+
+        guard isAuthorized else {
+            pauseForRevokedAuthorization()
+            return
+        }
+        if store.load(Int.self, forKey: StoreKey.monitoringSchemaVersion)
+            != ThresholdEvent.schemaVersion {
+            store.saveBool(false, forKey: StoreKey.monitoringAcceptsCallbacks)
+            store.saveBool(true, forKey: StoreKey.monitoringNeedsReconfigure)
+            center.stopMonitoring([.daily])
+        }
+        let hasTrackedTokens = !activeDistractionApps.isEmpty
+            || !activeDistractionWebDomains.isEmpty
+            || !activeMessagesApps.isEmpty
+        if store.bool(forKey: StoreKey.monitoringNeedsReconfigure)
+            || (hasTrackedTokens && !center.activities.contains(.daily)) {
+            scheduleMonitoringRestart()
+        }
     }
 
-    func setNoiseCategory(_ token: ActivityCategoryToken, tracked: Bool) {
-        if tracked { mutedNoise.categories.remove(token) }
-        else { mutedNoise.categories.insert(token) }
-        applyChanges()
+    func setNotificationsEnabled(_ enabled: Bool) {
+        if enabled {
+            Task { await requestNotificationAuthorization() }
+        } else {
+            config.notificationsEnabled = false
+            savePreferences()
+        }
+    }
+
+    func setNotification(at percent: Int, enabled: Bool) {
+        guard BudgetConfig.nudgePercents.contains(percent) else { return }
+        if enabled { config.notifyAt.insert(percent) }
+        else { config.notifyAt.remove(percent) }
+        savePreferences()
+    }
+
+    func setOvertimeNotifications(_ enabled: Bool) {
+        config.overtimeNotifications = enabled
+        savePreferences()
+    }
+
+    private func requestNotificationAuthorization() async {
+        do {
+            let approved = try await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound, .badge])
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            notificationStatus = settings.authorizationStatus
+            config.notificationsEnabled = approved
+            savePreferences()
+            if !approved {
+                lastError = "Notifications are off. NoiseGate will keep tracking, but iPhone settings must allow notifications before nudges can appear."
+            }
+        } catch {
+            config.notificationsEnabled = false
+            savePreferences()
+            lastError = "Notification permission could not be requested. Tracking is still active."
+        }
+    }
+
+    private func pauseForRevokedAuthorization() {
+        restartTask?.cancel()
+        store.saveBool(false, forKey: StoreKey.monitoringAcceptsCallbacks)
+        center.stopMonitoring([.daily])
+        updateSnapshot(resetProgress: false, monitoringIsActive: false)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    // MARK: - Paused tokens
+
+    func setDistractionApp(_ token: ApplicationToken, tracked: Bool) {
+        if tracked { pausedDistractions.applications.remove(token) }
+        else { pausedDistractions.applications.insert(token) }
+        applyTrackingChanges()
+    }
+
+    func setDistractionWebDomain(_ token: WebDomainToken, tracked: Bool) {
+        if tracked { pausedDistractions.webDomains.remove(token) }
+        else { pausedDistractions.webDomains.insert(token) }
+        applyTrackingChanges()
     }
 
     func setMessagesApp(_ token: ApplicationToken, tracked: Bool) {
-        if tracked { mutedMessages.applications.remove(token) }
-        else { mutedMessages.applications.insert(token) }
-        applyChanges()
+        if tracked { pausedMessages.applications.remove(token) }
+        else { pausedMessages.applications.insert(token) }
+        applyTrackingChanges()
     }
 
-    func setMessagesCategory(_ token: ActivityCategoryToken, tracked: Bool) {
-        if tracked { mutedMessages.categories.remove(token) }
-        else { mutedMessages.categories.insert(token) }
-        applyChanges()
+    // MARK: - Settings and persistence
+
+    func adjustBudget(_ keyPath: WritableKeyPath<BudgetConfig, Int>, by delta: Int) {
+        config[keyPath: keyPath] = min(
+            480,
+            max(5, config[keyPath: keyPath] + delta)
+        )
+        applyTrackingChanges()
     }
 
-    // MARK: - Persist + (re)schedule
+    /// Call after a picker, pause toggle, or budget edit. Old checkpoint floors
+    /// no longer describe the new rules, so they are cleared before monitoring
+    /// is rebuilt. The replacement includes today's past activity so its
+    /// checkpoint floor can be rebuilt under the new rules.
+    func applyTrackingChanges() {
+        let hadQueuedRestart = restartTask != nil
+        restartTask?.cancel()
+        store.saveBool(false, forKey: StoreKey.monitoringAcceptsCallbacks)
+        store.saveBool(true, forKey: StoreKey.monitoringNeedsReconfigure)
+        center.stopMonitoring([.daily])
 
-    /// Persists immediately, then runs the expensive side effects (widget
-    /// snapshot + timeline reload, DeviceActivity restart) after a short
-    /// debounce. Persistence is cheap and must never be lost; the restart
-    /// resets Apple's threshold accumulation for the day, and the widget
-    /// reload is systemwide — so rapid edits (stepper taps, toggle flips)
-    /// coalesce into one sync. Muted apps are excluded from the events —
-    /// nothing about them is recorded.
-    func applyChanges() {
-        persist()
+        let rejectedDistractionCategory = !distractionSelection.categoryTokens.isEmpty
+        let rejectedMessagesBreadth = !messagesSelection.categoryTokens.isEmpty
+            || !messagesSelection.webDomainTokens.isEmpty
+
+        distractionSelection = SelectionStore.sanitizeDistractions(distractionSelection)
+        messagesSelection = SelectionStore.sanitizeMessages(messagesSelection)
+        prunePausedTokens()
+        persistSelections()
+        config.save()
+        updateSnapshot(resetProgress: true, monitoringIsActive: false)
+        if !hadQueuedRestart {
+            WidgetCenter.shared.reloadAllTimelines()
+        }
+
+        if rejectedDistractionCategory || rejectedMessagesBreadth {
+            lastError = "Choose individual apps for Distractions and Messages. Whole categories are excluded because they can pull useful activity back into the total."
+        }
+        guard isAuthorized else { return }
+        scheduleMonitoringRestart()
+    }
+
+    /// Notification choices do not change usage thresholds, so saving them
+    /// must not restart DeviceActivity or erase today's checkpoint floor.
+    func savePreferences() {
+        config.save()
+        updateSnapshot(resetProgress: false, monitoringIsActive: nil)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    private func persistSelections() {
+        SelectionStore.saveDistractions(distractionSelection)
+        SelectionStore.saveMessages(messagesSelection)
+        SelectionStore.savePausedDistractions(pausedDistractions)
+        SelectionStore.savePausedMessages(pausedMessages)
+    }
+
+    private func prunePausedTokens() {
+        pausedDistractions.applications.formIntersection(
+            distractionSelection.applicationTokens
+        )
+        pausedDistractions.webDomains.formIntersection(
+            distractionSelection.webDomainTokens
+        )
+        pausedMessages.applications.formIntersection(messagesSelection.applicationTokens)
+        pausedMessages.webDomains.removeAll()
+    }
+
+    @discardableResult
+    private func updateSnapshot(
+        resetProgress: Bool,
+        monitoringIsActive: Bool?
+    ) -> UsageSnapshot {
+        let today = DayKey.today()
+        if let previous = store.load(
+            UsageSnapshot.self,
+            forKey: StoreKey.usageSnapshot
+        ) {
+            HistoryStore.recordFinishedSnapshot(previous, today: today)
+        }
+        return store.update(
+            UsageSnapshot.self,
+            forKey: StoreKey.usageSnapshot,
+            default: UsageSnapshot()
+        ) { snapshot in
+            if snapshot.dayKey != today {
+                snapshot = UsageSnapshot(dayKey: today, isFloor: true)
+            }
+            if resetProgress {
+                snapshot.distractionMinutes = 0
+                snapshot.messagesMinutes = 0
+            }
+            snapshot.distractionBudgetMinutes = config.distractionBudgetMinutes
+            snapshot.messagesBudgetMinutes = config.messagesBudgetMinutes
+            snapshot.distractionsConfigured = !activeDistractionApps.isEmpty
+                || !activeDistractionWebDomains.isEmpty
+            snapshot.messagesConfigured = !activeMessagesApps.isEmpty
+            snapshot.isFloor = true
+            if let monitoringIsActive {
+                snapshot.monitoringIsActive = monitoringIsActive
+            }
+            snapshot.updatedAt = .now
+        }
+    }
+
+    // MARK: - DeviceActivity
+
+    private func scheduleMonitoringRestart() {
         restartTask?.cancel()
         restartTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            self?.syncDeferred()
+            self?.restartTask = nil
+            self?.restartMonitoring()
         }
-    }
-
-    private func persist() {
-        // Prune muted tokens whose apps were removed from the selection.
-        mutedNoise.applications.formIntersection(noiseSelection.applicationTokens)
-        mutedNoise.categories.formIntersection(noiseSelection.categoryTokens)
-        mutedMessages.applications.formIntersection(messagesSelection.applicationTokens)
-        mutedMessages.categories.formIntersection(messagesSelection.categoryTokens)
-
-        SelectionStore.saveNoise(noiseSelection)
-        SelectionStore.saveMessages(messagesSelection)
-        SelectionStore.saveMutedNoise(mutedNoise)
-        SelectionStore.saveMutedMessages(mutedMessages)
-        config.save()
-    }
-
-    private func syncDeferred() {
-        var snap = UsageSnapshot.loadToday()
-        snap.noiseBudgetMinutes = config.noiseBudgetMinutes
-        snap.messagesBudgetMinutes = config.messagesBudgetMinutes
-        snap.isFloor = true
-        snap.save()
-        WidgetCenter.shared.reloadAllTimelines()
-
-        guard isAuthorized else { return }
-        restartMonitoring()
     }
 
     private func restartMonitoring() {
-        center.stopMonitoring()
-
+        store.saveBool(false, forKey: StoreKey.monitoringAcceptsCallbacks)
+        store.saveBool(true, forKey: StoreKey.monitoringNeedsReconfigure)
+        center.stopMonitoring([.daily])
         var events: [DeviceActivityEvent.Name: DeviceActivityEvent] = [:]
-        let allPercents = BudgetConfig.progressPercents + BudgetConfig.overtimePercents
+        let percents = BudgetConfig.progressPercents + BudgetConfig.overtimePercents
+        let generation = (store.load(
+            Int.self,
+            forKey: StoreKey.monitoringGeneration
+        ) ?? 0) + 1
 
-        if !activeNoiseApps.isEmpty || !activeNoiseCategories.isEmpty {
-            for pct in allPercents {
-                events[ThresholdEvent.name(kind: "noise", percent: pct)] = DeviceActivityEvent(
-                    applications: activeNoiseApps,
-                    categories: activeNoiseCategories,
-                    webDomains: noiseSelection.webDomainTokens,
-                    threshold: DateComponents(minute: max(1, config.noiseBudgetMinutes * pct / 100))
+        if !activeDistractionApps.isEmpty || !activeDistractionWebDomains.isEmpty {
+            for percent in percents {
+                events[ThresholdEvent.name(
+                    kind: "distractions",
+                    percent: percent,
+                    generation: generation,
+                    budgetMinutes: config.distractionBudgetMinutes
+                )] = makeEvent(
+                    applications: activeDistractionApps,
+                    webDomains: activeDistractionWebDomains,
+                    thresholdMinutes: ThresholdEvent.thresholdMinutes(
+                        budget: config.distractionBudgetMinutes,
+                        percent: percent
+                    )
                 )
             }
         }
-        if !activeMessagesApps.isEmpty || !activeMessagesCategories.isEmpty {
-            for pct in allPercents {
-                events[ThresholdEvent.name(kind: "msg", percent: pct)] = DeviceActivityEvent(
+        if !activeMessagesApps.isEmpty {
+            for percent in percents {
+                events[ThresholdEvent.name(
+                    kind: "msg",
+                    percent: percent,
+                    generation: generation,
+                    budgetMinutes: config.messagesBudgetMinutes
+                )] = makeEvent(
                     applications: activeMessagesApps,
-                    categories: activeMessagesCategories,
-                    webDomains: messagesSelection.webDomainTokens,
-                    threshold: DateComponents(minute: max(1, config.messagesBudgetMinutes * pct / 100))
+                    webDomains: [],
+                    thresholdMinutes: ThresholdEvent.thresholdMinutes(
+                        budget: config.messagesBudgetMinutes,
+                        percent: percent
+                    )
                 )
             }
         }
 
-        guard !events.isEmpty else { return }
+        guard !events.isEmpty else {
+            store.saveBool(false, forKey: StoreKey.monitoringAcceptsCallbacks)
+            store.saveBool(false, forKey: StoreKey.monitoringNeedsReconfigure)
+            store.save(
+                ThresholdEvent.schemaVersion,
+                forKey: StoreKey.monitoringSchemaVersion
+            )
+            store.removeValue(forKey: StoreKey.monitoringConfiguredAt)
+            updateSnapshot(resetProgress: false, monitoringIsActive: false)
+            WidgetCenter.shared.reloadAllTimelines()
+            return
+        }
+
         let allDay = DeviceActivitySchedule(
-            intervalStart: DateComponents(hour: 0, minute: 0),
-            intervalEnd: DateComponents(hour: 23, minute: 59),
+            intervalStart: DateComponents(hour: 0, minute: 0, second: 0),
+            intervalEnd: DateComponents(hour: 23, minute: 59, second: 59),
             repeats: true
         )
+        store.save(Date(), forKey: StoreKey.monitoringConfiguredAt)
+        store.save(generation, forKey: StoreKey.monitoringGeneration)
+        store.saveBool(true, forKey: StoreKey.monitoringAcceptsCallbacks)
         do {
             try center.startMonitoring(.daily, during: allDay, events: events)
+            store.saveBool(false, forKey: StoreKey.monitoringNeedsReconfigure)
+            store.save(
+                ThresholdEvent.schemaVersion,
+                forKey: StoreKey.monitoringSchemaVersion
+            )
+            updateSnapshot(resetProgress: false, monitoringIsActive: true)
+            WidgetCenter.shared.reloadAllTimelines()
+            if lastError?.hasPrefix("Monitoring did not start.") == true {
+                lastError = nil
+            }
         } catch {
-            lastError = "Could not start monitoring: \(error.localizedDescription)"
+            store.saveBool(false, forKey: StoreKey.monitoringAcceptsCallbacks)
+            store.saveBool(true, forKey: StoreKey.monitoringNeedsReconfigure)
+            store.removeValue(forKey: StoreKey.monitoringConfiguredAt)
+            updateSnapshot(resetProgress: false, monitoringIsActive: false)
+            lastError = "Monitoring did not start. Confirm Screen Time access and the Family Controls capability for the app, monitor, and report targets."
         }
     }
-}
 
-extension FamilyActivitySelection {
-    var isEmpty: Bool {
-        applicationTokens.isEmpty && categoryTokens.isEmpty && webDomainTokens.isEmpty
+    private func makeEvent(
+        applications: Set<ApplicationToken>,
+        webDomains: Set<WebDomainToken>,
+        thresholdMinutes: Int
+    ) -> DeviceActivityEvent {
+        return DeviceActivityEvent(
+            applications: applications,
+            categories: [],
+            webDomains: webDomains,
+            threshold: DateComponents(minute: thresholdMinutes),
+            includesPastActivity: true
+        )
     }
 }

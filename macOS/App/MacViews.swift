@@ -1,11 +1,13 @@
 import Charts
 import SwiftUI
+import UserNotifications
 
 struct MenuView: View {
     @EnvironmentObject private var model: MacModel
 
-    private var noiseOver: Bool {
-        model.noiseMinutesToday >= model.config.noiseBudgetMinutes
+    private var distractionOver: Bool {
+        model.distractionMinutesToday > model.config.distractionBudgetMinutes
+            && model.config.distractionBudgetMinutes > 0
     }
 
     var body: some View {
@@ -22,10 +24,11 @@ struct MenuView: View {
 
             HStack(spacing: 18) {
                 BudgetGauge(
-                    title: "Noise",
-                    minutes: model.noiseMinutesToday,
-                    budgetMinutes: model.config.noiseBudgetMinutes,
-                    tint: NG.noise,
+                    title: "Distractions",
+                    minutes: model.distractionMinutesToday,
+                    budgetMinutes: model.config.distractionBudgetMinutes,
+                    tint: NG.distraction,
+                    isConfigured: !model.distractionBundleIDs.isEmpty,
                     size: 96
                 )
                 BudgetGauge(
@@ -33,30 +36,32 @@ struct MenuView: View {
                     minutes: model.messagesMinutesToday,
                     budgetMinutes: model.config.messagesBudgetMinutes,
                     tint: NG.msg,
+                    isConfigured: !model.messagesBundleIDs.isEmpty,
                     size: 96
                 )
             }
             .frame(maxWidth: .infinity)
 
-            if noiseOver {
+            if distractionOver {
                 Label {
-                    Text("Noise is \((model.noiseMinutesToday - model.config.noiseBudgetMinutes).asHoursMinutes) over budget today. Resets at midnight.")
+                    Text("Distractions are \((model.distractionMinutesToday - model.config.distractionBudgetMinutes).asHoursMinutes) over budget today. Resets at midnight.")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(NG.inkSoft)
                 } icon: {
                     Image(systemName: "gauge.with.needle")
                         .foregroundStyle(NG.alarm)
                 }
-            } else {
-                Text("Only listed apps are counted. Nothing is blocked.")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(NG.inkSoft)
             }
 
-            MacWeekChart(
-                records: model.weekRecords,
-                budgetMinutes: model.config.noiseBudgetMinutes
-            )
+            Label(model.trackingDetail, systemImage: trackingIcon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(NG.inkSoft)
+
+            MacWeekChart(records: model.weekRecords)
+
+            Text("Only time accrued while selected enters a ledger. Everything else is noise. Nothing is blocked.")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(NG.inkSoft)
 
             Divider()
 
@@ -74,22 +79,26 @@ struct MenuView: View {
             .controlSize(.small)
         }
         .padding(16)
-        .frame(width: 280)
+        .frame(width: 300)
         .background(NG.paper)
+    }
+
+    private var trackingIcon: String {
+        if !model.isSessionActive { return "lock" }
+        if model.isUserIdle { return "pause.circle" }
+        return "circle.fill"
     }
 }
 
-/// 7-day noise mini chart for the menu popover. Takes the records once so the
-/// model's computed history isn't rebuilt per subview access.
-struct MacWeekChart: View {
+/// Receives one history snapshot so repeated chart subviews do not decode the
+/// app-group history again during the same render.
+private struct MacWeekChart: View {
     let records: [DayRecord]
-    let budgetMinutes: Int
 
     var body: some View {
-        // One day of data isn't a trend yet.
         if records.count >= 2 {
             VStack(alignment: .leading, spacing: 6) {
-                Text("NOISE · LAST \(records.count) DAYS")
+                Text("DISTRACTIONS · \(records.count) RECORDED DAYS")
                     .font(.ngLabel(9))
                     .tracking(1.5)
                     .foregroundStyle(NG.inkSoft)
@@ -97,14 +106,21 @@ struct MacWeekChart: View {
                     ForEach(records) { day in
                         BarMark(
                             x: .value("Day", day.date, unit: .day),
-                            y: .value("Minutes", day.noiseMinutes)
+                            y: .value("Minutes", day.distractionMinutes)
                         )
-                        .foregroundStyle(day.noiseReachedBudget ? NG.alarm : NG.noise)
+                        .foregroundStyle(
+                            day.distractionReachedBudget ? NG.alarm : NG.distraction
+                        )
                         .cornerRadius(3)
                     }
-                    RuleMark(y: .value("Budget", budgetMinutes))
+                    ForEach(records) { day in
+                        LineMark(
+                            x: .value("Day", day.date, unit: .day),
+                            y: .value("Daily budget", day.distractionBudgetMinutes)
+                        )
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                         .foregroundStyle(NG.inkSoft)
+                    }
                 }
                 .chartXAxis {
                     AxisMarks(values: .stride(by: .day)) { _ in
@@ -126,59 +142,102 @@ struct MacSettingsView: View {
             budgetsTab
                 .tabItem { Label("Budgets", systemImage: "slider.horizontal.3") }
             AppPickerTab(
-                title: "Noise apps",
-                subtitle: "Apps tracked against the noise budget. Toggle off to pause tracking.",
-                isOn: { model.noiseBundleIDs.contains($0) },
-                toggle: model.toggleNoise
+                title: "Distracting apps",
+                subtitle: "Future time in these apps counts toward Distractions. Selecting one here moves future time out of Messages.",
+                isOn: { model.distractionBundleIDs.contains($0) },
+                toggle: model.toggleDistraction
             )
-            .tabItem { Label("Noise", systemImage: "waveform.slash") }
+            .tabItem { Label("Distractions", systemImage: "waveform.slash") }
             AppPickerTab(
                 title: "Messaging apps",
-                subtitle: "Apps tracked against the Messages budget. Default: Messages only — FaceTime and WhatsApp are only tracked if you add them.",
+                subtitle: "Messages starts here by default. FaceTime and WhatsApp stay invisible unless you add them. Selecting an app here moves future time out of Distractions.",
                 isOn: { model.messagesBundleIDs.contains($0) },
                 toggle: model.toggleMessages
             )
             .tabItem { Label("Messages", systemImage: "message") }
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 520, height: 460)
+        .alert("NoiseGate needs attention", isPresented: Binding(
+            get: { model.lastError != nil },
+            set: { if !$0 { model.lastError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.lastError ?? "")
+        }
     }
 
     private var budgetsTab: some View {
         Form {
             Section("Daily budgets") {
-                Stepper(value: $model.config.noiseBudgetMinutes, in: 5...480, step: 5) {
-                    LabeledContent("Noise", value: model.config.noiseBudgetMinutes.asHoursMinutes)
+                Stepper(value: Binding(
+                    get: { model.config.distractionBudgetMinutes },
+                    set: { model.adjustBudget(
+                        \.distractionBudgetMinutes,
+                        by: $0 - model.config.distractionBudgetMinutes
+                    ) }
+                ), in: 5...480, step: 5) {
+                    LabeledContent(
+                        "Distractions",
+                        value: model.config.distractionBudgetMinutes.asHoursMinutes
+                    )
                 }
-                Stepper(value: $model.config.messagesBudgetMinutes, in: 5...480, step: 5) {
-                    LabeledContent("Messages", value: model.config.messagesBudgetMinutes.asHoursMinutes)
+                Stepper(value: Binding(
+                    get: { model.config.messagesBudgetMinutes },
+                    set: { model.adjustBudget(
+                        \.messagesBudgetMinutes,
+                        by: $0 - model.config.messagesBudgetMinutes
+                    ) }
+                ), in: 5...480, step: 5) {
+                    LabeledContent(
+                        "Messages",
+                        value: model.config.messagesBudgetMinutes.asHoursMinutes
+                    )
                 }
             }
+
             Section("Notifications") {
-                ForEach(BudgetConfig.nudgePercents, id: \.self) { pct in
-                    Toggle("At \(pct)% of budget", isOn: notifyBinding(pct))
+                Toggle("Allow checkpoint notifications", isOn: Binding(
+                    get: { model.config.notificationsEnabled },
+                    set: model.setNotificationsEnabled
+                ))
+                ForEach(BudgetConfig.nudgePercents, id: \.self) { percent in
+                    Toggle("At \(percent)% of budget", isOn: Binding(
+                        get: { model.config.notifyAt.contains(percent) },
+                        set: { model.setNotification(at: percent, enabled: $0) }
+                    ))
+                    .disabled(!model.config.notificationsEnabled)
                 }
-                Toggle("Past budget (150% and 200%)", isOn: $model.config.overtimeNotifications)
+                Toggle("Past budget (150% and 200%)", isOn: Binding(
+                    get: { model.config.overtimeNotifications },
+                    set: model.setOvertimeNotifications
+                ))
+                .disabled(!model.config.notificationsEnabled)
+                if model.notificationStatus == .denied {
+                    Text("Notifications are denied in System Settings. Tracking and widgets continue normally.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
-            Section("Menu bar") {
-                Toggle("Show today's noise minutes", isOn: $model.config.showMinutesInMenuBar)
+
+            Section("Tracker") {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { model.launchAtLoginEnabled },
+                    set: model.setLaunchAtLogin
+                ))
+                Toggle("Show distraction minutes in the menu bar", isOn: Binding(
+                    get: { model.config.showMinutesInMenuBar },
+                    set: model.setShowMinutesInMenuBar
+                ))
             }
+
             Section {
-                Text("Each notification is sent at most once per day, per category. Time only counts while the Mac is in use; after 2 minutes without input, counting stops. Nothing is blocked.")
+                Text("Time counts only while this Mac is active and an explicitly selected app is in front. Counting pauses after two minutes without input. Browser sites are not inspected. Nothing is blocked.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-    }
-
-    private func notifyBinding(_ percent: Int) -> Binding<Bool> {
-        Binding(
-            get: { model.config.notifyAt.contains(percent) },
-            set: { on in
-                if on { model.config.notifyAt.insert(percent) }
-                else { model.config.notifyAt.remove(percent) }
-            }
-        )
     }
 }
 
@@ -194,11 +253,14 @@ struct AppPickerTab: View {
         guard !search.isEmpty else { return model.installedApps }
         return model.installedApps.filter {
             $0.name.localizedCaseInsensitiveContains(search)
+                || $0.bundleID.localizedCaseInsensitiveContains(search)
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
             Text(subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -218,9 +280,12 @@ struct AppPickerTab: View {
                 }
             }
             HStack {
-                Button("Rescan installed apps") { model.discoverApps() }
-                    .controlSize(.small)
+                Text("Only time accrued while selected enters a ledger.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
+                Button("Rescan") { model.discoverApps() }
+                    .controlSize(.small)
             }
         }
         .padding()

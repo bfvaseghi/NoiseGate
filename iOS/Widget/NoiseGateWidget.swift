@@ -1,5 +1,5 @@
-import WidgetKit
 import SwiftUI
+import WidgetKit
 
 @main
 struct NoiseGateWidgetBundle: WidgetBundle {
@@ -16,8 +16,14 @@ struct SnapshotEntry: TimelineEntry {
 struct SnapshotProvider: TimelineProvider {
     func placeholder(in context: Context) -> SnapshotEntry {
         SnapshotEntry(date: .now, snapshot: UsageSnapshot(
-            noiseMinutes: 25, messagesMinutes: 40,
-            noiseBudgetMinutes: 45, messagesBudgetMinutes: 60, isFloor: true
+            distractionMinutes: 25,
+            messagesMinutes: 40,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 60,
+            distractionsConfigured: true,
+            messagesConfigured: true,
+            isFloor: true,
+            monitoringIsActive: true
         ))
     }
 
@@ -26,9 +32,6 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
-        // The monitor extension reloads timelines when a threshold is crossed.
-        // The scheduled refresh catches drift — and lands exactly at midnight
-        // when that comes first, so the daily reset shows promptly.
         let entry = SnapshotEntry(date: .now, snapshot: UsageSnapshot.loadToday())
         let calendar = Calendar.current
         let in15 = calendar.date(byAdding: .minute, value: 15, to: .now) ?? .now
@@ -46,8 +49,13 @@ struct NoiseGateWidget: Widget {
                 .containerBackground(NG.paper, for: .widget)
         }
         .configurationDisplayName("NoiseGate")
-        .description("Today's noise and Messages time against their budgets.")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+        .description("Distractions and Messages only. Everything else stays out.")
+        .supportedFamilies([
+            .systemSmall,
+            .systemMedium,
+            .accessoryCircular,
+            .accessoryRectangular
+        ])
     }
 }
 
@@ -57,55 +65,67 @@ struct NoiseGateWidgetView: View {
 
     private var snap: UsageSnapshot { entry.snapshot }
 
-    private var noiseOver: Bool {
-        snap.noiseMinutes >= snap.noiseBudgetMinutes && snap.noiseBudgetMinutes > 0
+    private var distractionOver: Bool {
+        snap.distractionsConfigured
+            && snap.distractionMinutes >= snap.distractionBudgetMinutes
+            && snap.distractionBudgetMinutes > 0
     }
 
     var body: some View {
         switch family {
         case .accessoryCircular:
-            Gauge(value: snap.noiseFraction) {
+            Gauge(value: snap.distractionFraction) {
                 Image(systemName: "waveform.slash")
             } currentValueLabel: {
-                Text("\(snap.noiseMinutes)m")
+                Text(checkpointText(
+                    snap.distractionMinutes,
+                    configured: snap.distractionsConfigured,
+                    compact: true
+                ))
             }
             .gaugeStyle(.accessoryCircular)
+            .accessibilityLabel("Distractions")
+            .accessibilityValue(accessibilityValue(
+                minutes: snap.distractionMinutes,
+                budget: snap.distractionBudgetMinutes,
+                configured: snap.distractionsConfigured
+            ))
 
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Image(systemName: "waveform.slash")
-                    Text("NoiseGate").font(.headline)
-                }
-                Text("Noise ≥\(snap.noiseMinutes)m / \(snap.noiseBudgetMinutes)m")
+                Label("NoiseGate", systemImage: "waveform.slash")
+                    .font(.headline)
+                Text("Distract. \(checkpointText(snap.distractionMinutes, configured: snap.distractionsConfigured)) / \(snap.distractionBudgetMinutes)m")
                     .font(.caption)
-                Text("Msgs ≥\(snap.messagesMinutes)m / \(snap.messagesBudgetMinutes)m")
+                Text("Messages \(checkpointText(snap.messagesMinutes, configured: snap.messagesConfigured)) / \(snap.messagesBudgetMinutes)m")
                     .font(.caption)
             }
 
         case .systemMedium:
-            HStack(spacing: 18) {
+            HStack(spacing: 16) {
                 BudgetGauge(
-                    title: "Noise",
-                    minutes: snap.noiseMinutes,
-                    budgetMinutes: snap.noiseBudgetMinutes,
-                    tint: NG.noise,
+                    title: "Distractions",
+                    minutes: snap.distractionMinutes,
+                    budgetMinutes: snap.distractionBudgetMinutes,
+                    tint: NG.distraction,
+                    isConfigured: snap.distractionsConfigured,
                     isFloor: snap.isFloor,
-                    size: 92
+                    size: 90
                 )
                 BudgetGauge(
-                    title: "Msgs",
+                    title: "Messages",
                     minutes: snap.messagesMinutes,
                     budgetMinutes: snap.messagesBudgetMinutes,
                     tint: NG.msg,
+                    isConfigured: snap.messagesConfigured,
                     isFloor: snap.isFloor,
-                    size: 92
+                    size: 90
                 )
                 VStack(alignment: .leading, spacing: 6) {
                     Text("NOISEGATE")
                         .font(.ngLabel(10))
                         .tracking(2)
-                        .foregroundStyle(noiseOver ? NG.alarm : NG.inkSoft)
+                        .foregroundStyle(distractionOver ? NG.alarm : NG.inkSoft)
                     Text(statusLine)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(NG.inkSoft)
@@ -114,25 +134,138 @@ struct NoiseGateWidgetView: View {
             }
             .padding(.horizontal, 2)
 
-        default: // systemSmall — one ring reads better than two crammed ones
-            BudgetGauge(
-                title: "Noise",
-                minutes: snap.noiseMinutes,
-                budgetMinutes: snap.noiseBudgetMinutes,
-                tint: NG.noise,
-                isFloor: snap.isFloor,
-                size: 96
-            )
+        default:
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("NOISEGATE")
+                        .font(.ngLabel(10))
+                        .tracking(2)
+                        .foregroundStyle(NG.ink)
+                    Spacer()
+                    Image(systemName: "waveform.slash")
+                        .foregroundStyle(NG.alarm)
+                }
+                CompactLedgerRow(
+                    title: "Distractions",
+                    minutes: snap.distractionMinutes,
+                    budget: snap.distractionBudgetMinutes,
+                    tint: NG.distraction,
+                    isConfigured: snap.distractionsConfigured,
+                    isFloor: snap.isFloor
+                )
+                CompactLedgerRow(
+                    title: "Messages",
+                    minutes: snap.messagesMinutes,
+                    budget: snap.messagesBudgetMinutes,
+                    tint: NG.msg,
+                    isConfigured: snap.messagesConfigured,
+                    isFloor: snap.isFloor
+                )
+                Text(compactStatus)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundStyle(NG.inkSoft)
+            }
         }
     }
 
     private var statusLine: String {
-        if noiseOver {
-            let over = snap.noiseMinutes - snap.noiseBudgetMinutes
-            return over > 0
-                ? "Noise ≥\(over.asHoursMinutes) over budget."
-                : "Noise budget reached."
+        guard snap.distractionsConfigured || snap.messagesConfigured else {
+            return "Choose apps in NoiseGate."
         }
-        return "≤\((snap.noiseBudgetMinutes - snap.noiseMinutes).asHoursMinutes) of noise remaining."
+        guard snap.monitoringIsActive else { return "Open NoiseGate to finish setup." }
+        guard snap.distractionsConfigured else {
+            return "Messages tracked separately."
+        }
+        if distractionOver {
+            let over = snap.distractionMinutes - snap.distractionBudgetMinutes
+            return over > 0
+                ? "Distractions ≥\(over.asHoursMinutes) over budget."
+                : "Distraction budget reached."
+        }
+        if snap.isFloor && snap.distractionMinutes == 0 {
+            return "Below the first checkpoint."
+        }
+        return "≤\((snap.distractionBudgetMinutes - snap.distractionMinutes).asHoursMinutes) remaining."
+    }
+
+    private var compactStatus: String {
+        guard snap.distractionsConfigured || snap.messagesConfigured else {
+            return "Choose apps in NoiseGate"
+        }
+        return snap.monitoringIsActive
+            ? "Everything else is excluded" : "Open NoiseGate to resume"
+    }
+
+    private func checkpointText(
+        _ minutes: Int,
+        configured: Bool,
+        compact: Bool = false
+    ) -> String {
+        guard configured else { return compact ? "—" : "Not set" }
+        if snap.isFloor && minutes == 0 { return compact ? "—" : "No checkpoint" }
+        let value = compact ? "\(minutes)m" : minutes.asHoursMinutes
+        return snap.isFloor && minutes > 0 ? "≥\(value)" : value
+    }
+
+    private func accessibilityValue(
+        minutes: Int,
+        budget: Int,
+        configured: Bool
+    ) -> String {
+        guard configured else { return "Not configured" }
+        if snap.isFloor && minutes == 0 { return "No checkpoint reached yet" }
+        let qualifier = snap.isFloor && minutes > 0 ? "at least " : ""
+        return "\(qualifier)\(minutes) minutes of a \(budget) minute budget"
+    }
+}
+
+private struct CompactLedgerRow: View {
+    let title: String
+    let minutes: Int
+    let budget: Int
+    let tint: Color
+    let isConfigured: Bool
+    let isFloor: Bool
+
+    private var fraction: Double {
+        guard isConfigured, budget > 0 else { return 0 }
+        return min(1, Double(minutes) / Double(budget))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(NG.ink)
+                Spacer()
+                Text(valueText)
+                    .font(.ngNumber(10.5))
+                    .foregroundStyle(NG.inkSoft)
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(tint.opacity(0.14))
+                    Capsule().fill(tint)
+                        .frame(width: geometry.size.width * fraction)
+                }
+            }
+            .frame(height: 6)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var valueText: String {
+        guard isConfigured else { return "Not set" }
+        guard !isFloor || minutes > 0 else { return "No checkpoint" }
+        return "\(isFloor ? "≥" : "")\(minutes.asHoursMinutes) / \(budget.asHoursMinutes)"
+    }
+
+    private var accessibilityValue: String {
+        guard isConfigured else { return "Not configured" }
+        guard !isFloor || minutes > 0 else { return "No checkpoint reached yet" }
+        return "\(isFloor ? "at least " : "")\(minutes) minutes of \(budget)"
     }
 }
