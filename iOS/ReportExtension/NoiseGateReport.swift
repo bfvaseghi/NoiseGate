@@ -548,7 +548,7 @@ struct RhythmBars: View {
             HStack(spacing: 0) {
                 ForEach([0, 6, 12, 18], id: \.self) { hour in
                     Text(RhythmView.hourLabel(hour))
-                        .font(.ngLabel(8.5))
+                        .font(.ngLabel(10))
                         .tracking(0.8)
                         .foregroundStyle(NG.inkSoft)
                         .frame(maxWidth: .infinity, alignment: .leading)

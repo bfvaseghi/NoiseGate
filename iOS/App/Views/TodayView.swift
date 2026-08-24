@@ -378,7 +378,7 @@ private struct StatColumn: View {
                 .minimumScaleFactor(0.7)
                 .lineLimit(1)
             Text(label)
-                .font(.ngLabel(9))
+                .font(.ngLabel(10))
                 .tracking(1.2)
                 .foregroundStyle(NG.inkSoft)
                 .multilineTextAlignment(.center)

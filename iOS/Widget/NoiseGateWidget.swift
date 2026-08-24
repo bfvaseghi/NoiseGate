@@ -200,7 +200,9 @@ struct NoiseGateWidgetView: View {
         case .accessoryRectangular:
             AccessoryRectangle(primary: primary, secondary: secondary)
         case .accessoryInline:
-            Text("\(primary.ledger.title) \(primary.valueText) · \(trackingStatus(primary))")
+            // Inline accessories get roughly a third of a line, so this is the
+            // ledger and the value and nothing else.
+            Text("\(primary.ledger.title) \(primary.valueText)")
         case .systemSmall:
             SmallSignalWidget(primary: primary, secondary: secondary)
         case .systemMedium:
@@ -272,74 +274,18 @@ private struct AccessoryRectangle: View {
     }
 }
 
+// MARK: - System families
+//
+// The layouts themselves live in Shared/WidgetViews.swift so the Mac widget
+// renders from exactly the same views. Only the family dispatch and the
+// accessory families, which are iPhone-only, stay here.
+
 private struct SmallSignalWidget: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            WidgetHeader(presentation: primary)
-
-            Text(primary.ledger.title.uppercased())
-                .font(.ngLabel(9))
-                .tracking(1.5)
-                .foregroundStyle(NG.inkSoft)
-
-            HStack(alignment: .lastTextBaseline, spacing: 5) {
-                Text(primary.valueText)
-                    .font(.ngNumber(27))
-                    .foregroundStyle(valueColor(primary))
-                    .minimumScaleFactor(0.65)
-                    .lineLimit(1)
-                if primary.isConfigured {
-                    Text("OF \(primary.budgetMinutes.asHoursMinutes)")
-                        .font(.ngLabel(8))
-                        .tracking(0.7)
-                        .foregroundStyle(NG.inkSoft)
-                }
-            }
-
-            SignalProgressBar(presentation: primary, height: 7)
-
-            Text(trackingStatus(primary))
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(statusColor(primary))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-
-            Spacer(minLength: 0)
-
-            if let secondary {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(signalColor(secondary))
-                        .frame(width: 6, height: 6)
-                    Text(secondary.ledger.title)
-                        .font(.system(size: 9.5, weight: .semibold))
-                        .foregroundStyle(NG.inkSoft)
-                    Spacer(minLength: 2)
-                    Text(secondary.valueAndBudgetText)
-                        .font(.ngNumber(9))
-                        .foregroundStyle(valueColor(secondary))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    if secondary.level == .reached || secondary.level == .over {
-                        Image(systemName: "flag.fill")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(NG.alarm)
-                            .accessibilityHidden(true)
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(secondary.ledger.title)
-                .accessibilityValue(secondary.accessibilityValue)
-            } else {
-                Text("Everything else is excluded")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(NG.inkSoft)
-            }
-        }
-        .accessibilityElement(children: .contain)
+        SmallSignalLayout(primary: primary, secondary: secondary)
     }
 }
 
@@ -348,64 +294,7 @@ private struct MediumSignalWidget: View {
     let secondary: WidgetLedgerPresentation?
 
     var body: some View {
-        HStack(spacing: 18) {
-            VStack(alignment: .leading, spacing: 8) {
-                WidgetHeader(presentation: primary)
-                Text(primary.ledger.title.uppercased())
-                    .font(.ngLabel(10))
-                    .tracking(1.6)
-                    .foregroundStyle(NG.inkSoft)
-                HStack(alignment: .lastTextBaseline, spacing: 8) {
-                    Text(primary.valueText)
-                        .font(.ngNumber(39))
-                        .foregroundStyle(valueColor(primary))
-                        .minimumScaleFactor(0.65)
-                        .lineLimit(1)
-                    if primary.isConfigured {
-                        Text("/ \(primary.budgetMinutes.asHoursMinutes)")
-                            .font(.ngNumber(13))
-                            .foregroundStyle(NG.inkSoft)
-                    }
-                }
-                SignalProgressBar(presentation: primary, height: 9)
-                Text(trackingStatus(primary))
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(statusColor(primary))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Rectangle()
-                .fill(NG.line)
-                .frame(width: 1)
-
-            VStack(alignment: .leading, spacing: 10) {
-                if let secondary {
-                    Text(secondary.ledger.title.uppercased())
-                        .font(.ngLabel(9))
-                        .tracking(1.5)
-                        .foregroundStyle(NG.inkSoft)
-                    Text(secondary.valueText)
-                        .font(.ngNumber(23))
-                        .foregroundStyle(valueColor(secondary))
-                    SignalProgressBar(presentation: secondary, height: 6)
-                    Text(trackingStatus(secondary))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(statusColor(secondary))
-                        .lineLimit(2)
-                } else {
-                    Image(systemName: "waveform.slash")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundStyle(NG.alarm)
-                        .accessibilityHidden(true)
-                    Text("Everything else stays excluded.")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(NG.inkSoft)
-                }
-            }
-            .frame(width: 102, alignment: .leading)
-            .accessibilityElement(children: .combine)
-        }
+        MediumSignalLayout(primary: primary, secondary: secondary)
     }
 }
 
@@ -415,228 +304,18 @@ private struct LargeSignalWidget: View {
     let summary: WidgetWeekSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            WidgetHeader(presentation: primary)
-
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(primary.ledger.title.uppercased())
-                        .font(.ngLabel(10))
-                        .tracking(1.7)
-                        .foregroundStyle(NG.inkSoft)
-                    HStack(alignment: .lastTextBaseline, spacing: 8) {
-                        Text(primary.valueText)
-                            .font(.ngNumber(45))
-                            .foregroundStyle(valueColor(primary))
-                        if primary.isConfigured {
-                            Text("OF \(primary.budgetMinutes.asHoursMinutes)")
-                                .font(.ngLabel(10))
-                                .tracking(0.8)
-                                .foregroundStyle(NG.inkSoft)
-                        }
-                    }
-                    SignalProgressBar(presentation: primary, height: 10)
-                    Text(trackingStatus(primary))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(statusColor(primary))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let secondary {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(secondary.ledger.title.uppercased())
-                            .font(.ngLabel(9))
-                            .tracking(1.5)
-                            .foregroundStyle(NG.inkSoft)
-                        Text(secondary.valueText)
-                            .font(.ngNumber(25))
-                            .foregroundStyle(valueColor(secondary))
-                        Text(secondary.isConfigured
-                            ? "OF \(secondary.budgetMinutes.asHoursMinutes)"
-                            : "NOT SET")
-                            .font(.ngLabel(8))
-                            .foregroundStyle(NG.inkSoft)
-                        SignalProgressBar(presentation: secondary, height: 6)
-                        Text(trackingStatus(secondary))
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(statusColor(secondary))
-                            .lineLimit(1)
-                    }
-                    .frame(width: 105, alignment: .leading)
-                    .accessibilityElement(children: .combine)
-                }
-            }
-
-            Rectangle()
-                .fill(NG.line)
-                .frame(height: 1)
-
-            WeekCrossingView(summary: summary)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(summary.summaryText)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(NG.inkSoft)
-                Text("Bars show at least the recorded checkpoint")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(NG.inkSoft)
-                Text("Everything else is excluded")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(NG.inkSoft)
-            }
-        }
-    }
-}
-
-private struct WeekCrossingView: View {
-    let summary: WidgetWeekSummary
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("SEVEN DAYS · \(summary.ledger.title.uppercased())")
-                .font(.ngLabel(9))
-                .tracking(1.5)
-                .foregroundStyle(NG.inkSoft)
-
-            HStack(alignment: .bottom, spacing: 10) {
-                ForEach(summary.days) { day in
-                    VStack(spacing: 5) {
-                        GeometryReader { geometry in
-                            ZStack(alignment: .bottom) {
-                                Capsule()
-                                    .fill(NG.line.opacity(0.65))
-                                if day.status == .noRecord {
-                                    Capsule()
-                                        .strokeBorder(NG.inkSoft.opacity(0.45), lineWidth: 1)
-                                } else {
-                                    Capsule()
-                                        .fill(day.status == .reached
-                                            ? NG.alarm : ledgerColor(summary.ledger))
-                                        .frame(height: max(
-                                            day.minutes > 0 ? 4 : 2,
-                                            geometry.size.height * day.fraction
-                                        ))
-                                }
-                            }
-                        }
-                        .frame(height: 45)
-
-                        Text(day.date, format: .dateTime.weekday(.narrow))
-                            .font(.system(size: 9, weight: day.isToday ? .bold : .medium))
-                            .foregroundStyle(day.isToday ? NG.ink : NG.inkSoft)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(day.date.formatted(date: .complete, time: .omitted))
-                    .accessibilityValue(accessibilityValue(for: day))
-                }
-            }
-        }
-    }
-
-    private func accessibilityValue(for day: WidgetWeekDay) -> String {
-        switch day.status {
-        case .noRecord: return "No record"
-        case .noCheckpoint: return "No checkpoint recorded"
-        case .zero: return "Zero minutes"
-        case .checkpoint:
-            return "At least \(day.minutes) minutes. No crossing confirmed"
-        case .reached:
-            return "Confirmed budget crossing at \(day.minutes) minutes or more"
-        }
-    }
-}
-
-private struct WidgetHeader: View {
-    let presentation: WidgetLedgerPresentation
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "waveform.slash")
-                .foregroundStyle(NG.alarm)
-                .accessibilityHidden(true)
-            Text("NOISEGATE")
-                .font(.ngLabel(9.5))
-                .tracking(1.8)
-                .foregroundStyle(NG.ink)
-            Spacer()
-            Image(systemName: headerSymbol(presentation))
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(headerColor(presentation))
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-private struct SignalProgressBar: View {
-    let presentation: WidgetLedgerPresentation
-    let height: CGFloat
-
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(ledgerColor(presentation.ledger).opacity(0.14))
-                Capsule()
-                    .fill(signalColor(presentation))
-                    .frame(width: geometry.size.width * presentation.fraction)
-            }
-        }
-        .frame(height: height)
-        .accessibilityHidden(true)
-    }
-}
-
-private func ledgerColor(_ ledger: WidgetLedger) -> Color {
-    ledger == .distractions ? NG.distraction : NG.msg
-}
-
-private func signalColor(_ presentation: WidgetLedgerPresentation) -> Color {
-    presentation.level == .reached || presentation.level == .over
-        ? NG.alarm : ledgerColor(presentation.ledger)
-}
-
-private func valueColor(_ presentation: WidgetLedgerPresentation) -> Color {
-    presentation.level == .reached || presentation.level == .over
-        ? NG.alarm : NG.ink
-}
-
-private func statusColor(_ presentation: WidgetLedgerPresentation) -> Color {
-    presentation.monitoringIsActive ? NG.ink : NG.inkSoft
-}
-
-private func headerColor(_ presentation: WidgetLedgerPresentation) -> Color {
-    guard presentation.monitoringIsActive else { return NG.inkSoft }
-    return presentation.level == .reached || presentation.level == .over
-        ? NG.alarm : NG.inkSoft
-}
-
-private func headerSymbol(_ presentation: WidgetLedgerPresentation) -> String {
-    if presentation.level == .notConfigured { return "plus.circle" }
-    guard presentation.monitoringIsActive else { return "pause.circle.fill" }
-    switch presentation.level {
-    case .notConfigured: return "plus.circle"
-    case .waitingForCheckpoint: return "circle.dotted"
-    case .clear: return "circle"
-    case .watch: return "circle.bottomhalf.filled"
-    case .high: return "circle.fill"
-    case .reached: return "flag.fill"
-    case .over: return "exclamationmark.circle.fill"
+        LargeSignalLayout(primary: primary, secondary: secondary, summary: summary)
     }
 }
 
 private func accessorySymbol(_ presentation: WidgetLedgerPresentation) -> String {
-    if presentation.level == .notConfigured { return "plus" }
-    guard presentation.monitoringIsActive else { return "pause.fill" }
-    return presentation.ledger == .distractions ? "waveform.slash" : "message.fill"
+    WidgetStyle.symbol(presentation)
+}
+
+private func headerSymbol(_ presentation: WidgetLedgerPresentation) -> String {
+    WidgetStyle.symbol(presentation)
 }
 
 private func trackingStatus(_ presentation: WidgetLedgerPresentation) -> String {
-    guard presentation.level != .notConfigured else {
-        return presentation.signalText
-    }
-    guard presentation.monitoringIsActive else {
-        return "Last checkpoint · Open to resume"
-    }
-    return presentation.signalText
+    WidgetStyle.status(presentation)
 }

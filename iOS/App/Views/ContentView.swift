@@ -95,7 +95,7 @@ struct NGTabBar: View {
                         Image(systemName: tab.icon)
                             .font(.system(size: 16, weight: .bold))
                         Text(tab.label.uppercased())
-                            .font(.ngLabel(9))
+                            .font(.ngLabel(10))
                             .tracking(1.2)
                     }
                     .frame(maxWidth: .infinity)

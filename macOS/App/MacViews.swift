@@ -99,7 +99,7 @@ private struct MacWeekChart: View {
         if records.count >= 2 {
             VStack(alignment: .leading, spacing: 6) {
                 Text("DISTRACTIONS · \(records.count) RECORDED DAYS")
-                    .font(.ngLabel(9))
+                    .font(.ngLabel(10))
                     .tracking(1.5)
                     .foregroundStyle(NG.inkSoft)
                 Chart {

@@ -255,11 +255,22 @@ struct WidgetWeekSummary: Equatable {
         days.filter { $0.status == .checkpoint }.count
     }
 
+    /// "Confirmed crossing" is lower-bound language: on iPhone a day only
+    /// counts once a threshold actually fired. Mac values are exact, so there
+    /// it states plainly how many days reached the budget.
     var summaryText: String {
+        let isFloor = days.first?.isFloor ?? true
+        if isFloor {
+            switch reachedDayCount {
+            case 0: return "No confirmed crossings"
+            case 1: return "1 confirmed crossing"
+            default: return "\(reachedDayCount) confirmed crossings"
+            }
+        }
         switch reachedDayCount {
-        case 0: return "No confirmed crossings"
-        case 1: return "1 confirmed crossing"
-        default: return "\(reachedDayCount) confirmed crossings"
+        case 0: return "Budget not reached"
+        case 1: return "Budget reached on 1 day"
+        default: return "Budget reached on \(reachedDayCount) days"
         }
     }
 
