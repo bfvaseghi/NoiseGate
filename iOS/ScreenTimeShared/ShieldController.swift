@@ -12,9 +12,9 @@ enum ShieldReason: String, CaseIterable {
 
     var explanation: String {
         switch self {
-        case .focus: return "You turned on Focus. The noise can wait."
-        case .budget: return "You've spent today's noise budget. See you tomorrow."
-        case .quiet: return "Quiet hours. Nothing good is happening in there right now."
+        case .focus: return "YOU turned Focus on. You meant it. Get out of here."
+        case .budget: return "Budget's SPENT. You set this limit for a reason. See you tomorrow."
+        case .quiet: return "It's quiet hours. Nothing good is happening in there. Go to bed."
         }
     }
 }

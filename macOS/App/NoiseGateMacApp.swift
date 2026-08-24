@@ -13,7 +13,13 @@ struct NoiseGateMacApp: App {
             MenuView()
                 .environmentObject(model)
         } label: {
-            Image(systemName: model.enforcementActive ? "moon.fill" : "waveform.slash")
+            // Over budget? Say so right in the menu bar.
+            if model.noiseMinutesToday >= model.config.noiseBudgetMinutes {
+                Label("OVER", systemImage: "exclamationmark.octagon.fill")
+                    .labelStyle(.titleAndIcon)
+            } else {
+                Image(systemName: model.enforcementActive ? "moon.fill" : "waveform.slash")
+            }
         }
         .menuBarExtraStyle(.window)
 

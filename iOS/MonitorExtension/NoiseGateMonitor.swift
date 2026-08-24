@@ -61,24 +61,49 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
 
+        // Escalating overtime nags past 100% (only reachable while unblocked —
+        // a shielded app can't accumulate more usage).
+        if percent > 100 {
+            let over = percent - 100
+            if kind == "noise" {
+                let bodies: [Int: String] = [
+                    110: "10% past your noise budget. That word doesn't mean what you think it means.",
+                    125: "A quarter over budget. Put. It. Down.",
+                    150: "That's 1.5× your noise budget. This is an intervention.",
+                    200: "DOUBLE your noise budget. NoiseGate is officially judging you."
+                ]
+                notify(id: "noise.\(percent)", title: "⛔️ \(over)% OVER on noise",
+                       body: bodies[percent] ?? "You're \(over)% over your noise budget.",
+                       critical: true)
+            } else {
+                notify(id: "msg.\(percent)", title: "💬 \(over)% over on messages",
+                       body: "You're \(over)% past your messaging budget. Still not blocking you — but come on.",
+                       critical: true)
+            }
+            return
+        }
+
         // Nudges at 50 / 80 / 100.
         guard BudgetConfig.nudgePercents.contains(percent) else { return }
         if kind == "noise" {
             switch percent {
             case 50:
-                notify(id: "noise.50", title: "Halfway through the noise 📉",
-                       body: "You've used half of today's noise budget (\(config.noiseBudgetMinutes.asHoursMinutes)). Worth it so far?")
+                notify(id: "noise.50", title: "⚠️ HALF the noise budget — gone",
+                       body: "That's half of \(config.noiseBudgetMinutes.asHoursMinutes) on apps you yourself called worthless. Worth it?")
             case 80:
-                notify(id: "noise.80", title: "80% of the noise budget gone",
-                       body: "About \(max(1, config.noiseBudgetMinutes / 5).asHoursMinutes) left. Land the plane.")
+                notify(id: "noise.80", title: "🚨 80% burned",
+                       body: "About \(max(1, config.noiseBudgetMinutes / 5).asHoursMinutes) of noise left. Land the plane NOW.",
+                       critical: true)
             case 100:
                 if config.blockNoiseAtBudget {
                     ShieldController.add(.budget)
-                    notify(id: "noise.100", title: "Noise budget spent 🔇",
-                           body: "That's the lot — noise apps are blocked until tomorrow.")
+                    notify(id: "noise.100", title: "⛔️ DONE. Noise is BLOCKED.",
+                           body: "Budget spent. The wall is up until midnight. Go be a person.",
+                           critical: true)
                 } else {
-                    notify(id: "noise.100", title: "Noise budget spent",
-                           body: "You're past \(config.noiseBudgetMinutes.asHoursMinutes) of noise today. Blocking is off, so this is just a nudge.")
+                    notify(id: "noise.100", title: "⛔️ Noise budget SPENT",
+                           body: "Past \(config.noiseBudgetMinutes.asHoursMinutes) of noise today. Blocking is off — that was your call.",
+                           critical: true)
                 }
             default:
                 break
@@ -86,25 +111,29 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         } else if kind == "msg" {
             switch percent {
             case 50:
-                notify(id: "msg.50", title: "Messages check-in 💬",
+                notify(id: "msg.50", title: "💬 Messages: halfway",
                        body: "Half of today's messaging budget used.")
             case 80:
-                notify(id: "msg.80", title: "Messages at 80%",
-                       body: "You've been in messages a while. Maybe just call them?")
+                notify(id: "msg.80", title: "💬 Messages at 80%",
+                       body: "You've been in messages a while. Just call them.")
             case 100:
-                notify(id: "msg.100", title: "Messages budget spent",
-                       body: "Over \(config.messagesBudgetMinutes.asHoursMinutes) of messaging today. Not blocked — just so you know.")
+                notify(id: "msg.100", title: "💬 Messages budget SPENT",
+                       body: "Over \(config.messagesBudgetMinutes.asHoursMinutes) of messaging today. Never blocked — but you said you wanted to know.",
+                       critical: true)
             default:
                 break
             }
         }
     }
 
-    private func notify(id: String, title: String, body: String) {
+    /// `critical` bumps the interruption level to time-sensitive so the nudge
+    /// punches through scheduled summaries and most Focus modes.
+    private func notify(id: String, title: String, body: String, critical: Bool = false) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
+        content.interruptionLevel = critical ? .timeSensitive : .active
         let request = UNNotificationRequest(
             identifier: "noisegate.\(id).\(DayKey.today())",
             content: content,

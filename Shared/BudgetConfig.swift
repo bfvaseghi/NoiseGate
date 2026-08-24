@@ -18,6 +18,8 @@ struct BudgetConfig: Codable, Equatable {
     static let nudgePercents: [Int] = [50, 80, 100]
     /// Percent steps used for threshold events, which also drive widget progress.
     static let progressPercents: [Int] = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+    /// Escalating overtime nags past 100% — NoiseGate does not let it go.
+    static let overtimePercents: [Int] = [110, 125, 150, 200]
 
     static func load() -> BudgetConfig {
         AppGroup.defaults.codable(BudgetConfig.self, forKey: StoreKey.budgetConfig) ?? BudgetConfig()

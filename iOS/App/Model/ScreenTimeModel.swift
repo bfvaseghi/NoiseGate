@@ -96,8 +96,9 @@ final class ScreenTimeModel: ObservableObject {
         // 1. All-day window with threshold events at every 10% of each budget.
         //    The 10% steps double as widget progress; 50/80/100 also nudge.
         var events: [DeviceActivityEvent.Name: DeviceActivityEvent] = [:]
+        let allPercents = BudgetConfig.progressPercents + BudgetConfig.overtimePercents
         if !noiseSelection.isEmpty {
-            for pct in BudgetConfig.progressPercents {
+            for pct in allPercents {
                 events[ThresholdEvent.name(kind: "noise", percent: pct)] = DeviceActivityEvent(
                     applications: noiseSelection.applicationTokens,
                     categories: noiseSelection.categoryTokens,
@@ -107,7 +108,7 @@ final class ScreenTimeModel: ObservableObject {
             }
         }
         if !messagesSelection.isEmpty {
-            for pct in BudgetConfig.progressPercents {
+            for pct in allPercents {
                 events[ThresholdEvent.name(kind: "msg", percent: pct)] = DeviceActivityEvent(
                     applications: messagesSelection.applicationTokens,
                     categories: messagesSelection.categoryTokens,

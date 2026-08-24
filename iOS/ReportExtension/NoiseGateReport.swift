@@ -1,15 +1,18 @@
 import DeviceActivity
 import SwiftUI
 
-/// Renders exact usage for whatever filter the host app passes in (the noise
-/// selection or the messages selection). Screen Time data stays inside this
-/// sandboxed view — it can't be exported, which is why the widget uses
-/// threshold floors instead.
+/// Renders exact usage for the filter the host app passes in. Screen Time data
+/// stays inside this sandboxed view — it can't be exported, which is why the
+/// widget uses threshold floors instead. Two scenes, one per category, so each
+/// can compare against its own budget and get loud about it.
 @main
 struct NoiseGateReportExtension: DeviceActivityReportExtension {
     var body: some DeviceActivityReportScene {
-        TotalActivityReport { summary in
-            TotalActivityView(summary: summary)
+        NoiseReport { summary in
+            LoudActivityView(summary: summary, kind: .noise)
+        }
+        MessagesReport { summary in
+            LoudActivityView(summary: summary, kind: .messages)
         }
     }
 }
@@ -20,62 +23,110 @@ struct ActivitySummary {
 }
 
 extension DeviceActivityReport.Context {
-    static let totalActivity = Self("Total Activity")
+    static let noise = Self("Noise")
+    static let messages = Self("Messages")
 }
 
-struct TotalActivityReport: DeviceActivityReportScene {
-    let context: DeviceActivityReport.Context = .totalActivity
-    let content: (ActivitySummary) -> TotalActivityView
+private func summarize(
+    _ data: DeviceActivityResults<DeviceActivityData>
+) async -> ActivitySummary {
+    var summary = ActivitySummary()
+    var perApp: [String: TimeInterval] = [:]
+
+    for await deviceData in data {
+        for await segment in deviceData.activitySegments {
+            summary.totalDuration += segment.totalActivityDuration
+            for await category in segment.categories {
+                for await app in category.applications {
+                    let name = app.application.localizedDisplayName ?? "Unknown app"
+                    perApp[name, default: 0] += app.totalActivityDuration
+                }
+            }
+        }
+    }
+
+    summary.topApps = perApp
+        .sorted { $0.value > $1.value }
+        .prefix(3)
+        .map { (name: $0.key, duration: $0.value) }
+    return summary
+}
+
+struct NoiseReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .noise
+    let content: (ActivitySummary) -> LoudActivityView
 
     func makeConfiguration(
         representing data: DeviceActivityResults<DeviceActivityData>
     ) async -> ActivitySummary {
-        var summary = ActivitySummary()
-        var perApp: [String: TimeInterval] = [:]
-
-        for await deviceData in data {
-            for await segment in deviceData.activitySegments {
-                summary.totalDuration += segment.totalActivityDuration
-                for await category in segment.categories {
-                    for await app in category.applications {
-                        let name = app.application.localizedDisplayName ?? "Unknown app"
-                        perApp[name, default: 0] += app.totalActivityDuration
-                    }
-                }
-            }
-        }
-
-        summary.topApps = perApp
-            .sorted { $0.value > $1.value }
-            .prefix(3)
-            .map { (name: $0.key, duration: $0.value) }
-        return summary
+        await summarize(data)
     }
 }
 
-struct TotalActivityView: View {
-    let summary: ActivitySummary
+struct MessagesReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .messages
+    let content: (ActivitySummary) -> LoudActivityView
 
-    private func format(_ duration: TimeInterval) -> String {
-        let minutes = Int(duration / 60)
-        return minutes.asHoursMinutes
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> ActivitySummary {
+        await summarize(data)
+    }
+}
+
+struct LoudActivityView: View {
+    enum Kind { case noise, messages }
+
+    let summary: ActivitySummary
+    let kind: Kind
+
+    private var budgetMinutes: Int {
+        let config = BudgetConfig.load()
+        return kind == .noise ? config.noiseBudgetMinutes : config.messagesBudgetMinutes
+    }
+
+    private var minutes: Int { Int(summary.totalDuration / 60) }
+    private var overBudget: Bool { minutes >= budgetMinutes && budgetMinutes > 0 }
+    private var fraction: Double {
+        budgetMinutes > 0 ? min(1, Double(minutes) / Double(budgetMinutes)) : 0
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(format(summary.totalDuration))
-                .font(.system(.largeTitle, design: .rounded).weight(.bold))
-                .foregroundStyle(summary.totalDuration > 0 ? .primary : .secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(minutes.asHoursMinutes)
+                    .font(.system(size: 44, weight: .black, design: .rounded))
+                    .foregroundStyle(overBudget ? .red : (kind == .noise ? .orange : .teal))
+                Text("/ \(budgetMinutes.asHoursMinutes)")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if overBudget {
+                    Text("OVER")
+                        .font(.caption.weight(.black))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.red, in: Capsule())
+                        .foregroundStyle(.white)
+                }
+            }
+
+            ProgressView(value: fraction)
+                .tint(overBudget ? .red : (kind == .noise ? .orange : .teal))
+                .scaleEffect(y: 2, anchor: .center)
+
             if summary.topApps.isEmpty {
-                Text("Nothing yet today. Keep it that way.")
-                    .font(.footnote)
+                Text(kind == .noise
+                        ? "Zero noise so far. Keep it that way."
+                        : "No messaging yet today.")
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(summary.topApps, id: \.name) { app in
                     HStack {
-                        Text(app.name).font(.footnote)
+                        Text(app.name).font(.footnote.weight(.medium))
                         Spacer()
-                        Text(format(app.duration))
+                        Text(Int(app.duration / 60).asHoursMinutes)
                             .font(.footnote.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }

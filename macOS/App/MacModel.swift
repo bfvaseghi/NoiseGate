@@ -49,6 +49,10 @@ final class MacModel: ObservableObject {
     private let tickSeconds: Double = 5
     /// Stop counting after 2 minutes without keyboard/mouse input.
     private let idleCutoff: Double = 120
+    /// While you're actively over budget and unblocked, nag again this often.
+    private let overtimeNagInterval: TimeInterval = 300
+    private var lastNoiseOvertimeNag: Date?
+    private var lastMessagesOvertimeNag: Date?
 
     var noiseMinutesToday: Int { Int(noiseSecondsToday / 60) }
     var messagesMinutesToday: Int { Int(messagesSecondsToday / 60) }
@@ -131,6 +135,14 @@ final class MacModel: ObservableObject {
 
         if isNoise && enforcementActive {
             block(frontmost)
+        } else if isNoise && noiseMinutesToday >= config.noiseBudgetMinutes {
+            // Over budget with blocking off: keep nagging every 5 minutes.
+            nagOvertime(kind: "noise", lastNag: &lastNoiseOvertimeNag,
+                        overMinutes: noiseMinutesToday - config.noiseBudgetMinutes)
+        }
+        if isMessages && messagesMinutesToday >= config.messagesBudgetMinutes {
+            nagOvertime(kind: "msg", lastNag: &lastMessagesOvertimeNag,
+                        overMinutes: messagesMinutesToday - config.messagesBudgetMinutes)
         }
         persistIfDue()
     }
@@ -196,11 +208,12 @@ final class MacModel: ObservableObject {
     private func block(_ app: NSRunningApplication) {
         app.hide()
         let reason: String
-        if focusOn { reason = "Focus is on." }
-        else if inQuietHours { reason = "It's quiet hours." }
-        else { reason = "Today's noise budget is spent." }
+        if focusOn { reason = "YOU turned Focus on. You meant it." }
+        else if inQuietHours { reason = "It's quiet hours. Go to bed." }
+        else { reason = "Today's noise budget is SPENT." }
+        SlamOverlay.shared.slam(appName: app.localizedName ?? "That app", reason: reason)
         notifyOnce(id: "blocked.\(app.bundleIdentifier ?? "?")",
-                   title: "\(app.localizedName ?? "That app") is blocked 🔇",
+                   title: "⛔️ \(app.localizedName ?? "That app") is BLOCKED",
                    body: reason)
     }
 
@@ -228,48 +241,78 @@ final class MacModel: ObservableObject {
         for pct in BudgetConfig.nudgePercents where minutes * 100 >= budget * pct {
             let title: String
             let body: String
+            var critical = false
             switch (kind, pct) {
             case ("noise", 50):
-                title = "Halfway through the noise 📉"
-                body = "Half of today's Mac noise budget (\(budget.asHoursMinutes)) is gone."
+                title = "⚠️ HALF the noise budget — gone"
+                body = "That's half of \(budget.asHoursMinutes) on apps you yourself called worthless."
             case ("noise", 80):
-                title = "80% of the noise budget gone"
-                body = "Wrap it up — \(max(0, budget - minutes).asHoursMinutes) left."
+                title = "🚨 80% burned"
+                body = "Wrap it up — \(max(0, budget - minutes).asHoursMinutes) of noise left. NOW."
+                critical = true
             case ("noise", 100):
-                title = "Noise budget spent 🔇"
+                title = "⛔️ Noise budget SPENT"
                 body = config.blockNoiseAtBudget
-                    ? "Noise apps will be hidden for the rest of the day."
-                    : "You're over budget. Blocking is off, so this is just a nudge."
+                    ? "Noise apps get slammed shut for the rest of the day. Go be a person."
+                    : "You're over budget and blocking is off. That was your call."
+                critical = true
             case ("msg", 50):
-                title = "Messages check-in 💬"
+                title = "💬 Messages: halfway"
                 body = "Half of today's messaging budget used."
             case ("msg", 80):
-                title = "Messages at 80%"
-                body = "You've been in messages a while."
+                title = "💬 Messages at 80%"
+                body = "You've been in messages a while. Just call them."
             case ("msg", 100):
-                title = "Messages budget spent"
+                title = "💬 Messages budget SPENT"
                 body = "Over \(budget.asHoursMinutes) of messaging today — tracked, never blocked."
+                critical = true
             default:
                 continue
             }
-            notifyOnce(id: "\(kind).\(pct)", title: title, body: body)
+            notifyOnce(id: "\(kind).\(pct)", title: title, body: body, critical: critical)
+        }
+    }
+
+    /// While you're actively in an over-budget category, keep the pressure on —
+    /// one nag per `overtimeNagInterval`, not once per day.
+    private func nagOvertime(kind: String, lastNag: inout Date?, overMinutes: Int) {
+        if let last = lastNag, Date().timeIntervalSince(last) < overtimeNagInterval { return }
+        lastNag = Date()
+        if kind == "noise" {
+            post(id: "noise.overtime.\(Int(Date().timeIntervalSince1970))",
+                 title: "⛔️ STILL in the noise",
+                 body: overMinutes > 0
+                    ? "\(overMinutes.asHoursMinutes) past your noise budget and counting. Close it."
+                    : "Your noise budget is spent and you're still here. Close it.",
+                 critical: true)
+        } else {
+            post(id: "msg.overtime.\(Int(Date().timeIntervalSince1970))",
+                 title: "💬 Still in messages",
+                 body: overMinutes > 0
+                    ? "\(overMinutes.asHoursMinutes) over your messaging budget. Wrap it up or just call."
+                    : "Messaging budget spent. Wrap it up or just call.",
+                 critical: true)
         }
     }
 
     /// Sends each distinct nudge at most once per day.
-    private func notifyOnce(id: String, title: String, body: String) {
+    private func notifyOnce(id: String, title: String, body: String, critical: Bool = false) {
         let key = "\(id)@\(DayKey.today())"
         var sent = AppGroup.defaults.stringArray(forKey: StoreKey.macNudgesSent) ?? []
         guard !sent.contains(key) else { return }
         sent.append(key)
         AppGroup.defaults.set(sent, forKey: StoreKey.macNudgesSent)
+        post(id: key, title: title, body: body, critical: critical)
+    }
 
+    private func post(id: String, title: String, body: String, critical: Bool) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
+        content.interruptionLevel = critical ? .timeSensitive : .active
         UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "noisegate.\(key)", content: content, trigger: nil)
+            UNNotificationRequest(identifier: "noisegate.\(id)", content: content, trigger: nil)
         )
     }
 

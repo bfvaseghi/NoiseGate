@@ -36,7 +36,6 @@ struct NoiseGateMacWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "NoiseGateMacWidget", provider: MacSnapshotProvider()) { entry in
             MacWidgetView(entry: entry)
-                .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("NoiseGate")
         .description("Today's noise and messaging time on this Mac.")
@@ -50,7 +49,25 @@ struct MacWidgetView: View {
 
     private var snap: UsageSnapshot { entry.snapshot }
 
+    private var noiseOver: Bool {
+        snap.noiseMinutes >= snap.noiseBudgetMinutes && snap.noiseBudgetMinutes > 0
+    }
+
     var body: some View {
+        if noiseOver {
+            content
+                .containerBackground(for: .widget) {
+                    LinearGradient(colors: [.red, Color(red: 0.6, green: 0, blue: 0)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                .environment(\.colorScheme, .dark)
+        } else {
+            content
+                .containerBackground(.background, for: .widget)
+        }
+    }
+
+    private var content: some View {
         HStack(spacing: 14) {
             BudgetGauge(
                 title: "Noise",
@@ -72,11 +89,11 @@ struct MacWidgetView: View {
                     )
                     .font(.caption.weight(.medium))
                     .foregroundStyle(snap.focusActive ? Color.indigo : .secondary)
-                    Text(snap.noiseMinutes >= snap.noiseBudgetMinutes
-                            ? "Noise budget spent."
+                    Text(noiseOver
+                            ? "OVER by \((snap.noiseMinutes - snap.noiseBudgetMinutes).asHoursMinutes). You know what to do."
                             : "\((snap.noiseBudgetMinutes - snap.noiseMinutes).asHoursMinutes) of noise left.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(noiseOver ? .caption2.weight(.bold) : .caption2)
+                        .foregroundStyle(noiseOver ? .primary : .secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

@@ -8,15 +8,15 @@ class ShieldConfigExtension: ShieldConfigurationDataSource {
     private func makeConfiguration() -> ShieldConfiguration {
         let reason = ShieldController.activeReasons().first
         return ShieldConfiguration(
-            backgroundBlurStyle: .systemUltraThinMaterialDark,
-            backgroundColor: UIColor.black.withAlphaComponent(0.6),
-            icon: UIImage(systemName: "waveform.slash"),
-            title: ShieldConfiguration.Label(text: "NoiseGate", color: .white),
+            backgroundBlurStyle: .systemThickMaterialDark,
+            backgroundColor: UIColor.systemRed,
+            icon: UIImage(systemName: "hand.raised.fill"),
+            title: ShieldConfiguration.Label(text: "STOP.", color: .white),
             subtitle: ShieldConfiguration.Label(
-                text: reason?.explanation ?? "This app is blocked right now.",
-                color: UIColor(white: 0.85, alpha: 1)
+                text: reason?.explanation ?? "This app is blocked. You know why.",
+                color: .white
             ),
-            primaryButtonLabel: ShieldConfiguration.Label(text: "Back to real life", color: .black),
+            primaryButtonLabel: ShieldConfiguration.Label(text: "Fine. Leaving.", color: .systemRed),
             primaryButtonBackgroundColor: .white
         )
     }

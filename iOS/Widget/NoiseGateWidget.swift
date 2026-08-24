@@ -38,7 +38,6 @@ struct NoiseGateWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "NoiseGateWidget", provider: SnapshotProvider()) { entry in
             NoiseGateWidgetView(entry: entry)
-                .containerBackground(.background, for: .widget)
         }
         .configurationDisplayName("NoiseGate")
         .description("Today's noise and messaging budgets at a glance.")
@@ -52,7 +51,27 @@ struct NoiseGateWidgetView: View {
 
     private var snap: UsageSnapshot { entry.snapshot }
 
+    private var noiseOver: Bool {
+        snap.noiseMinutes >= snap.noiseBudgetMinutes && snap.noiseBudgetMinutes > 0
+    }
+
     var body: some View {
+        if noiseOver, family == .systemSmall || family == .systemMedium {
+            content
+                .containerBackground(for: .widget) {
+                    LinearGradient(colors: [.red, Color(red: 0.6, green: 0, blue: 0)],
+                                   startPoint: .top, endPoint: .bottom)
+                }
+                // Dark scheme so text and gauges render light on the red slab.
+                .environment(\.colorScheme, .dark)
+        } else {
+            content
+                .containerBackground(.background, for: .widget)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch family {
         case .accessoryCircular:
             Gauge(value: snap.noiseFraction) {
@@ -66,7 +85,8 @@ struct NoiseGateWidgetView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Image(systemName: snap.focusActive ? "moon.fill" : "waveform.slash")
-                    Text("NoiseGate").font(.headline)
+                    Text(noiseOver ? "OVER BUDGET" : "NoiseGate")
+                        .font(.headline.weight(noiseOver ? .black : .semibold))
                 }
                 Text("Noise ≥\(snap.noiseMinutes)m / \(snap.noiseBudgetMinutes)m")
                     .font(.caption)
@@ -117,8 +137,11 @@ struct NoiseGateWidgetView: View {
     }
 
     private var statusLine: String {
-        if snap.noiseMinutes >= snap.noiseBudgetMinutes {
-            return "Noise budget spent."
+        if noiseOver {
+            let over = snap.noiseMinutes - snap.noiseBudgetMinutes
+            return over > 0
+                ? "≥\(over.asHoursMinutes) OVER. You know what to do."
+                : "Budget SPENT. You know what to do."
         }
         let left = snap.noiseBudgetMinutes - snap.noiseMinutes
         return "≤\(left.asHoursMinutes) of noise left today."

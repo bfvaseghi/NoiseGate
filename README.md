@@ -1,8 +1,10 @@
 # NoiseGate
 
-Screen time, minus the sanctimony and minus the noise floor. Apple's Screen Time
-counts *everything* — including the apps you're supposed to be using. NoiseGate
-only cares about two things:
+**Screen time that gets in your face.** For iPhone, iPad, and Mac.
+
+Apple's Screen Time counts *everything* — including the apps you're supposed to
+be using — and then whispers about it. NoiseGate does the opposite: it only
+cares about two things, and it is not subtle about either of them:
 
 1. **Noise** — the apps you flag as pure distraction (social media and friends).
    Budgeted, nudged, and **blocked** when you're over.
@@ -15,28 +17,35 @@ Everything else on your devices is none of this app's business.
 
 | Target | What it does |
 | --- | --- |
-| `NoiseGate` (iOS) | Pick noise + messaging apps, see today's exact usage, Focus toggle, quiet hours, budgets |
-| `NoiseGateMonitor` (iOS) | Background monitor: nudges at 50/80/100%, blocks noise at 100%, feeds the widget |
-| `NoiseGateReport` (iOS) | Renders exact usage numbers inside the app (privacy-preserving) |
-| `NoiseGateShieldUI` (iOS) | Custom block screen ("Back to real life") |
-| `NoiseGateWidget` (iOS) | Home-screen + lock-screen widget with Noise and Messages budget rings |
-| `NoiseGateMac` (macOS) | Menu-bar app: tracks flagged apps only, nudges, hides noise apps when over budget / in Focus / quiet hours |
-| `NoiseGateMacWidget` (macOS) | Desktop/Notification-Center widget with the same rings |
+| `NoiseGate` (iOS — iPhone **and iPad**) | Pick noise + messaging apps, exact usage with OVER banners, Focus toggle, quiet hours, budgets |
+| `NoiseGateMonitor` (iOS) | Background monitor: nudges at 50/80/100% plus overtime nags at 110/125/150/200%, blocks noise at 100%, feeds the widget |
+| `NoiseGateReport` (iOS) | Renders exact usage vs. budget inside the app, with a big red OVER treatment (privacy-preserving) |
+| `NoiseGateShieldUI` (iOS) | Full-red block screen: **"STOP."** |
+| `NoiseGateWidget` (iOS) | Home-screen + lock-screen widget; turns into a red slab when you're over budget |
+| `NoiseGateMac` (macOS) | Menu-bar app: tracks flagged apps only, nags, hides noise apps, and flashes a full-screen **"NOPE."** when a blocked app surfaces; menu-bar icon flips to **OVER** |
+| `NoiseGateMacWidget` (macOS) | Desktop/Notification-Center widget with the same red-slab over state |
 
 ## Features
 
 - **Only what you flag is tracked.** Apps are chosen with Apple's
   `FamilyActivityPicker`; the selection is opaque tokens, so NoiseGate never
   even learns which apps you picked.
-- **Nudges ("you're going too high")** at 50%, 80%, and 100% of each budget, on
-  both platforms, at most once a day each.
+- **In your face, by design.** Nudges at 50/80/100% escalate to overtime nags
+  at 110/125/150/200% and are delivered as *time-sensitive* notifications, so
+  they punch through notification summaries and most Focus modes. Widgets and
+  the app turn into red OVER slabs; the Mac flashes a full-screen "NOPE." when
+  a blocked app comes forward, and keeps nagging every 5 minutes while you're
+  actively over budget with blocking off.
 - **Blocking, three ways**: a manual *Focus now* toggle, automatic block when
   the daily noise budget hits 100% (optional), and scheduled *quiet hours*
   (overnight windows supported).
 - **Messages tracked separately** — its own budget and its own ring, never
   blocked.
-- **Widgets** on iPhone (small, medium, lock-screen circular + rectangular) and
-  Mac (small, medium).
+- **Widgets** on iPhone/iPad (small, medium, lock-screen circular +
+  rectangular) and Mac (small, medium).
+- **iPhone, iPad, and Mac.** One iOS app for iPhone and iPad (all orientations
+  on iPad); the Mac has its own companion since Apple offers no third-party
+  Screen Time API there.
 
 ## Building
 
@@ -87,7 +96,11 @@ add the widget. Done.
 - **The Mac app is intentionally not sandboxed** (hiding other apps is not
   possible from the sandbox), so it's for direct distribution / personal
   builds, not the Mac App Store.
-- iPhone and Mac each track their own day locally; totals are per-device.
+- Each device keeps its own daily tally — iPhone, iPad, and Mac are separate
+  counts, not a merged total.
+- Time-sensitive nudges require the user to leave "Time Sensitive
+  Notifications" enabled for NoiseGate (it's on by default once notifications
+  are allowed).
 
 ## Repo layout
 
