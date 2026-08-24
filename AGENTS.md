@@ -30,7 +30,7 @@ only in `Shared/NudgeText.swift`.
 project.yml                     XcodeGen source of truth for all targets
 Shared/
   AppGroup.swift                App-group identifiers and stable storage keys
-  SharedStore.swift             Process lock + cross-process flock persistence
+  SharedStore.swift             Process lock + cross-process file-lock persistence
   PrivacyInfo.xcprivacy         Required-reason declaration for UserDefaults
   BudgetConfig.swift            Budgets, notification choices, v1 migration
   UsageSnapshot.swift           Widget feed and v1 migration
@@ -202,7 +202,7 @@ by seven, not only by days that had usage.
 ### 10. Keep persistence atomic and migrations tolerant
 
 Use `SharedStore` for App Group data.  Its `NSLock` protects threads and its
-Darwin `flock` protects processes.  Use `update` or `updateStringSet` for every
+Darwin `lockf` lock protects processes.  Use `update` or `updateStringSet` for every
 read-modify-write operation.
 
 New Codable fields require `decodeIfPresent` defaults.  Do not remove legacy

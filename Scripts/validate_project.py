@@ -98,7 +98,8 @@ require_contains("iOS/App/Views/TodayView.swift", [
 ])
 require_contains("Shared/SharedStore.swift", [
     "NSLock()",
-    "Darwin.flock(descriptor, LOCK_EX)",
+    "Darwin.lockf(descriptor, F_LOCK, 0)",
+    "Darwin.lockf(descriptor, F_ULOCK, 0)",
     "func update<T: Codable>",
 ])
 require_contains("macOS/App/MacModel.swift", [

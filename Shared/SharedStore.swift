@@ -4,7 +4,7 @@ import Foundation
 /// App-group persistence shared by the apps, extensions, and widgets.
 ///
 /// UserDefaults does not make a read-modify-write sequence atomic across
-/// processes. A process lock plus an app-group `flock` prevents a monitor
+/// processes. A process lock plus an app-group file lock prevents a monitor
 /// callback, widget read, and foreground save from overwriting one another.
 final class SharedStore {
     static let shared = SharedStore()
@@ -90,19 +90,30 @@ final class SharedStore {
         let descriptor = lockFileURL.map {
             Darwin.open($0.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
         } ?? -1
-        if descriptor >= 0 {
-            _ = Darwin.flock(descriptor, LOCK_EX)
-        }
+        let hasFileLock = descriptor >= 0 && acquireFileLock(descriptor)
         defaults.synchronize()
 
         defer {
             defaults.synchronize()
             if descriptor >= 0 {
-                _ = Darwin.flock(descriptor, LOCK_UN)
+                if hasFileLock {
+                    _ = Darwin.lockf(descriptor, F_ULOCK, 0)
+                }
                 Darwin.close(descriptor)
             }
             processLock.unlock()
         }
         return body()
+    }
+
+    private func acquireFileLock(_ descriptor: Int32) -> Bool {
+        while true {
+            if Darwin.lockf(descriptor, F_LOCK, 0) == 0 {
+                return true
+            }
+            if errno != EINTR {
+                return false
+            }
+        }
     }
 }
