@@ -19,21 +19,6 @@ struct MenuView: View {
                     .foregroundStyle(NG.ink)
             }
 
-            if noiseOver {
-                Text("YOU'RE OVER.")
-                    .font(.ngDisplay(16))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(
-                        ZStack {
-                            NG.overBannerGradient
-                            HazardStripes(opacity: 0.1, lineWidth: 6, gap: 12)
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    )
-            }
-
             HStack(spacing: 18) {
                 BudgetGauge(
                     title: "Noise",
@@ -52,35 +37,18 @@ struct MenuView: View {
             }
             .frame(maxWidth: .infinity)
 
-            // Compact version of the iOS focus slab.
-            Button {
-                model.setFocus(!model.focusOn)
-            } label: {
-                HStack {
-                    Image(systemName: model.focusOn ? "moon.fill" : "moon")
-                        .font(.system(size: 14, weight: .black))
-                    Text(model.focusOn ? "FOCUSED — TAP TO END" : "FOCUS NOW")
-                        .font(.ngLabel(11))
-                        .tracking(1.5)
-                    Spacer()
+            if noiseOver {
+                Label {
+                    Text("Past your noise line for today — tomorrow resets the count.")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(NG.inkSoft)
+                } icon: {
+                    Image(systemName: "gauge.with.needle")
+                        .foregroundStyle(NG.alarm)
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .background(
-                    model.focusOn ? AnyShapeStyle(NG.focusGradient) : AnyShapeStyle(NG.ink),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
-            }
-            .buttonStyle(.plain)
-
-            if model.enforcementActive {
-                Text(model.focusOn
-                        ? "Noise apps are hidden while Focus is on."
-                        : model.inQuietHours
-                            ? "Quiet hours — noise apps are hidden."
-                            : "Noise budget spent — noise apps are hidden.")
-                    .font(.system(size: 11, weight: .semibold))
+            } else {
+                Text("Only flagged apps are counted. Nothing is ever blocked.")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NG.inkSoft)
             }
 
@@ -114,14 +82,14 @@ struct MacSettingsView: View {
                 .tabItem { Label("Budgets", systemImage: "slider.horizontal.3") }
             AppPickerTab(
                 title: "Noise apps",
-                subtitle: "Budgeted, nudged, and hidden when you're over. Social media lives here.",
+                subtitle: "The distracting stuff. Tracked and budgeted — never blocked. Toggle off to pause.",
                 isOn: { model.noiseBundleIDs.contains($0) },
                 toggle: model.toggleNoise
             )
             .tabItem { Label("Noise", systemImage: "waveform.slash") }
             AppPickerTab(
                 title: "Messaging apps",
-                subtitle: "Tracked separately with their own budget. Nudged, never blocked.",
+                subtitle: "Just Messages, ideally — FaceTime and WhatsApp are real conversation, leave them out.",
                 isOn: { model.messagesBundleIDs.contains($0) },
                 toggle: model.toggleMessages
             )
@@ -141,33 +109,12 @@ struct MacSettingsView: View {
                 }
             }
             Section {
-                Toggle("Hide noise apps at 100%", isOn: $model.config.blockNoiseAtBudget)
-                Toggle("Quiet hours", isOn: $model.config.quietHoursEnabled)
-                if model.config.quietHoursEnabled {
-                    quietHoursPickers
-                }
-            } footer: {
-                Text("Nudges arrive at 50%, 80%, and 100% of each budget. Time only counts while you're actually at the keyboard — idle time is ignored.")
+                Text("Friendly check-ins at 50%, 80%, and 100% of each budget, plus a gentle note if a day runs far past the line. Time only counts while you're actually at the keyboard — idle time is ignored. Nothing is ever blocked.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-    }
-
-    private var quietHoursPickers: some View {
-        Group {
-            Picker("From", selection: $model.config.quietStartMinutes) {
-                ForEach(0..<48, id: \.self) { halfHour in
-                    Text(String(format: "%02d:%02d", halfHour / 2, (halfHour % 2) * 30))
-                        .tag(halfHour * 30)
-                }
-            }
-            Picker("Until", selection: $model.config.quietEndMinutes) {
-                ForEach(0..<48, id: \.self) { halfHour in
-                    Text(String(format: "%02d:%02d", halfHour / 2, (halfHour % 2) * 30))
-                        .tag(halfHour * 30)
-                }
-            }
-        }
     }
 }
 

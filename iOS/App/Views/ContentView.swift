@@ -4,13 +4,13 @@ import FamilyControls
 // MARK: - Root: custom tab shell over the three screens
 
 enum NGTab: String, CaseIterable, Identifiable {
-    case today, blocking, budgets
+    case today, noise, budgets
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .today: return "Today"
-        case .blocking: return "Blocking"
+        case .noise: return "Noise"
         case .budgets: return "Budgets"
         }
     }
@@ -18,7 +18,7 @@ enum NGTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .today: return "gauge.with.needle"
-        case .blocking: return "hand.raised.fill"
+        case .noise: return "waveform.slash"
         case .budgets: return "slider.horizontal.3"
         }
     }
@@ -35,7 +35,7 @@ struct ContentView: View {
                     Group {
                         switch tab {
                         case .today: TodayView()
-                        case .blocking: BlockingView()
+                        case .noise: NoiseView()
                         case .budgets: SettingsView()
                         }
                     }
@@ -127,7 +127,7 @@ struct OnboardingView: View {
             }
             .padding(.bottom, 24)
 
-            Text("Screen Time counts everything — even the apps you're supposed to use. NoiseGate watches only the apps you flag as noise, tracks messaging separately, and gets loud when you drift.")
+            Text("Screen Time counts everything — even the apps you're supposed to use. NoiseGate watches only the apps you flag as noise, tracks Messages separately, and taps you on the shoulder when you drift past your own line. It never blocks anything.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
                 .frame(maxWidth: 340, alignment: .leading)

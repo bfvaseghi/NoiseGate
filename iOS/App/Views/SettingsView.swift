@@ -7,9 +7,9 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 18) {
                 PosterHeader(
-                    eyebrow: "The rules",
+                    eyebrow: "Your lines",
                     title: "BUDGETS.",
-                    detail: "Nudges at 50 / 80 / 100% — then it stops being polite."
+                    detail: "Friendly check-ins at 50, 80, and 100%. Nothing is ever blocked."
                 )
                 .padding(.top, 8)
 
@@ -22,35 +22,26 @@ struct SettingsView: View {
                 BudgetDial(
                     chip: "Messages", tint: NG.msg,
                     minutes: model.config.messagesBudgetMinutes,
-                    caption: "Tracked separately. Never blocked."
+                    caption: "Tracked separately, on its own line."
                 ) { adjust(\.messagesBudgetMinutes, by: $0) }
 
-                RuleToggle(
-                    title: "Block noise at 100%",
-                    subtitle: "Budget spent → the wall goes up until midnight. Off = overtime nags instead.",
-                    icon: "hand.raised.fill",
-                    tint: NG.alarm,
-                    isOn: $model.config.blockNoiseAtBudget
-                )
-
-                VStack(spacing: 0) {
-                    RuleToggle(
-                        title: "Quiet hours",
-                        subtitle: "Noise apps are always blocked during the window. Overnight is fine.",
-                        icon: "moon.stars.fill",
-                        tint: NG.focus,
-                        isOn: $model.config.quietHoursEnabled,
-                        framed: false
-                    )
-                    if model.config.quietHoursEnabled {
-                        Divider().padding(.vertical, 10)
-                        HStack(spacing: 14) {
-                            QuietTime(label: "From", selection: minutesBinding(\.quietStartMinutes))
-                            QuietTime(label: "Until", selection: minutesBinding(\.quietEndMinutes))
-                        }
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "bell.badge")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(NG.focus, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("How check-ins work")
+                            .font(.system(size: 15.5, weight: .bold))
+                            .foregroundStyle(NG.ink)
+                        Text("A quiet note at 50%, 80%, and 100% of each budget, and a gentle check-in if a day runs far past the line. That's it — blocking is your other app's job.")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(NG.inkSoft)
                     }
+                    Spacer()
                 }
-                .ngCard()
+                .ngCard(padding: 16)
 
                 Spacer(minLength: 96)
             }
@@ -70,22 +61,6 @@ struct SettingsView: View {
             let value = model.config[keyPath: keyPath] + delta
             model.config[keyPath: keyPath] = min(480, max(5, value))
         }
-    }
-
-    /// Bridges a minutes-from-midnight Int in the config to a DatePicker Date.
-    private func minutesBinding(_ keyPath: WritableKeyPath<BudgetConfig, Int>) -> Binding<Date> {
-        Binding<Date>(
-            get: {
-                let minutes = model.config[keyPath: keyPath]
-                return Calendar.current.date(
-                    bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: .now
-                ) ?? .now
-            },
-            set: { date in
-                let comps = Calendar.current.dateComponents([.hour, .minute], from: date)
-                model.config[keyPath: keyPath] = (comps.hour ?? 0) * 60 + (comps.minute ?? 0)
-            }
-        )
     }
 }
 
@@ -135,59 +110,5 @@ struct BudgetDial: View {
                 .overlay(Circle().strokeBorder(tint.opacity(0.35), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct RuleToggle: View {
-    let title: String
-    let subtitle: String
-    let icon: String
-    let tint: Color
-    @Binding var isOn: Bool
-    var framed: Bool = true
-
-    var body: some View {
-        let row = HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(tint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 15.5, weight: .bold))
-                    .foregroundStyle(NG.ink)
-                Text(subtitle)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(NG.inkSoft)
-            }
-            Spacer()
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .tint(tint)
-        }
-        if framed {
-            row.ngCard(padding: 16)
-        } else {
-            row
-        }
-    }
-}
-
-struct QuietTime: View {
-    let label: String
-    let selection: Binding<Date>
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label.uppercased())
-                .font(.ngLabel(10))
-                .tracking(2)
-                .foregroundStyle(NG.inkSoft)
-            DatePicker("", selection: selection, displayedComponents: .hourAndMinute)
-                .labelsHidden()
-                .datePickerStyle(.compact)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -1,6 +1,7 @@
 import SwiftUI
 import DeviceActivity
 import FamilyControls
+import ManagedSettings
 
 extension DeviceActivityReport.Context {
     static let noise = Self("Noise")
@@ -9,7 +10,8 @@ extension DeviceActivityReport.Context {
 
 /// Today's picture: exact durations rendered by the report extension
 /// (privacy-preserving — the numbers never leave the report view), scoped to
-/// only the noise selection and the messages selection. No everything-feed.
+/// only the *active* noise and messages tokens. Paused apps and everything
+/// you never flagged are invisible here. No everything-feed.
 struct TodayView: View {
     @EnvironmentObject private var model: ScreenTimeModel
     @State private var snapshot = UsageSnapshot.loadToday()
@@ -21,19 +23,30 @@ struct TodayView: View {
             ?? DateInterval(start: .now, duration: 3600)
     }
 
-    private func filter(for selection: FamilyActivitySelection) -> DeviceActivityFilter {
+    private func filter(
+        apps: Set<ApplicationToken>,
+        categories: Set<ActivityCategoryToken>,
+        webDomains: Set<WebDomainToken>
+    ) -> DeviceActivityFilter {
         DeviceActivityFilter(
             segment: .daily(during: todayInterval),
             users: .all,
             devices: .init([.iPhone, .iPad]),
-            applications: selection.applicationTokens,
-            categories: selection.categoryTokens,
-            webDomains: selection.webDomainTokens
+            applications: apps,
+            categories: categories,
+            webDomains: webDomains
         )
     }
 
     private var noiseOver: Bool {
         snapshot.noiseMinutes >= snapshot.noiseBudgetMinutes && snapshot.noiseBudgetMinutes > 0
+    }
+
+    private var noiseActive: Bool {
+        !model.activeNoiseApps.isEmpty || !model.activeNoiseCategories.isEmpty
+    }
+    private var messagesActive: Bool {
+        !model.activeMessagesApps.isEmpty || !model.activeMessagesCategories.isEmpty
     }
 
     var body: some View {
@@ -48,8 +61,7 @@ struct TodayView: View {
 
                 if noiseOver {
                     OverBudgetBanner(
-                        overMinutes: snapshot.noiseMinutes - snapshot.noiseBudgetMinutes,
-                        blocked: model.config.blockNoiseAtBudget
+                        overMinutes: snapshot.noiseMinutes - snapshot.noiseBudgetMinutes
                     )
                 }
 
@@ -57,11 +69,17 @@ struct TodayView: View {
                     chip: "Noise", tint: NG.noise,
                     budget: model.config.noiseBudgetMinutes
                 ) {
-                    if model.noiseSelection.isEmpty {
-                        MissingSelectionRow(text: "Pick your noise apps in the Blocking tab.")
+                    if !noiseActive {
+                        MissingSelectionRow(text: model.noiseSelection.isEmpty
+                            ? "Pick your noise apps in the Noise tab."
+                            : "Everything here is paused right now.")
                     } else {
-                        DeviceActivityReport(.noise, filter: filter(for: model.noiseSelection))
-                            .frame(height: 168)
+                        DeviceActivityReport(.noise, filter: filter(
+                            apps: model.activeNoiseApps,
+                            categories: model.activeNoiseCategories,
+                            webDomains: model.noiseSelection.webDomainTokens
+                        ))
+                        .frame(height: 168)
                     }
                 }
 
@@ -69,17 +87,21 @@ struct TodayView: View {
                     chip: "Messages", tint: NG.msg,
                     budget: model.config.messagesBudgetMinutes
                 ) {
-                    if model.messagesSelection.isEmpty {
-                        MissingSelectionRow(text: "Pick your messaging apps in the Blocking tab.")
+                    if !messagesActive {
+                        MissingSelectionRow(text: model.messagesSelection.isEmpty
+                            ? "Add the Messages app in the Noise tab."
+                            : "Messages tracking is paused right now.")
                     } else {
-                        DeviceActivityReport(.messages, filter: filter(for: model.messagesSelection))
-                            .frame(height: 168)
+                        DeviceActivityReport(.messages, filter: filter(
+                            apps: model.activeMessagesApps,
+                            categories: model.activeMessagesCategories,
+                            webDomains: model.messagesSelection.webDomainTokens
+                        ))
+                        .frame(height: 168)
                     }
                 }
 
-                FocusStatusCard(focusOn: model.focusOn)
-
-                Text("Only the apps you flagged are counted. Everything else on this device is none of NoiseGate's business.")
+                Text("Only the apps you flagged are counted — nothing here gets blocked, and everything else on this device is none of NoiseGate's business.")
                     .font(.ngLabel(11.5))
                     .foregroundStyle(NG.inkSoft)
                     .multilineTextAlignment(.center)
@@ -121,56 +143,35 @@ struct UsageCard<Content: View>: View {
     }
 }
 
-/// Full-width alarm slab with hazard stripes, shown the moment the noise
-/// budget is spent.
+/// A calm heads-up once the noise budget is spent. Informative, not scolding —
+/// and nothing gets blocked.
 struct OverBudgetBanner: View {
     let overMinutes: Int
-    let blocked: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("YOU'RE OVER.")
-                .font(.ngDisplay(34))
-            Text(blocked
-                    ? "Noise budget spent — the wall is up until midnight."
-                    : overMinutes > 0
-                        ? "At least \(overMinutes.asHoursMinutes) past your noise budget, and nothing is stopping you. That was your call."
-                        : "Noise budget spent, and nothing is stopping you. That was your call.")
-                .font(.system(size: 14.5, weight: .semibold))
-        }
-        .foregroundStyle(.white)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(
-            ZStack {
-                NG.overBannerGradient
-                HazardStripes(opacity: 0.10)
+        HStack(spacing: 14) {
+            Image(systemName: "gauge.with.needle")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(NG.alarm, in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Over your line today")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(NG.ink)
+                Text(overMinutes > 0
+                        ? "At least \(overMinutes.asHoursMinutes) past your noise budget. Tomorrow resets the count."
+                        : "You've hit your noise budget. Tomorrow resets the count.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(NG.inkSoft)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        )
-        .shadow(color: NG.alarm.opacity(0.35), radius: 18, y: 8)
-    }
-}
-
-struct FocusStatusCard: View {
-    let focusOn: Bool
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: focusOn ? "moon.fill" : "moon")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(focusOn ? Color.white : NG.inkSoft)
-                .frame(width: 40, height: 40)
-                .background(
-                    focusOn ? AnyShapeStyle(NG.focusGradient) : AnyShapeStyle(NG.line.opacity(0.5)),
-                    in: Circle()
-                )
-            Text(focusOn ? "Focus is ON — noise apps are walled off." : "Focus is off.")
-                .font(.system(size: 15, weight: focusOn ? .bold : .medium))
-                .foregroundStyle(focusOn ? NG.ink : NG.inkSoft)
             Spacer()
         }
         .ngCard(padding: 14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(NG.alarm.opacity(0.35), lineWidth: 1.5)
+        )
     }
 }
 

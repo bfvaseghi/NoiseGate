@@ -87,24 +87,13 @@ struct MacWidgetView: View {
             )
             if family == .systemMedium {
                 VStack(alignment: .leading, spacing: 7) {
-                    if noiseOver {
-                        Text("YOU'RE\nOVER.")
-                            .font(.ngDisplay(26))
-                            .lineSpacing(-2)
-                    } else {
-                        Label(
-                            snap.focusActive ? "Focus on" : "Focus off",
-                            systemImage: snap.focusActive ? "moon.fill" : "moon"
-                        )
-                        .font(.ngLabel(11))
-                        .tracking(1)
-                        .foregroundStyle(snap.focusActive ? NG.focus : .secondary)
-                    }
+                    Text(noiseOver ? "OVER." : "NOISE.")
+                        .font(.ngDisplay(26))
                     Text(noiseOver
-                            ? "OVER by \((snap.noiseMinutes - snap.noiseBudgetMinutes).asHoursMinutes). You know what to do."
-                            : "\((snap.noiseBudgetMinutes - snap.noiseMinutes).asHoursMinutes) of noise left.")
+                            ? "\((snap.noiseMinutes - snap.noiseBudgetMinutes).asHoursMinutes) past your line. Tomorrow resets."
+                            : "\((snap.noiseBudgetMinutes - snap.noiseMinutes).asHoursMinutes) of noise left today.")
                         .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(noiseOver ? .primary : .secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

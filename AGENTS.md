@@ -5,34 +5,42 @@ contributors. Read this before touching anything.
 
 ## What this app is
 
-NoiseGate is an in-your-face screen-time app for iPhone, iPad, and Mac. It
-tracks ONLY two user-chosen categories — "noise" apps (distractions; budgeted,
-nudged, and blocked) and messaging apps (tracked separately, nudged, **never
-blocked**) — and ignores everything else on the device. The tone of the whole
-product is loud and blunt: red slabs, condensed caps, "STOP.", "NOPE.",
-"YOU'RE OVER." Do not soften the copy or the visuals; that is the product.
+NoiseGate is a personalized screen-time tracker for iPhone, iPad, and Mac. It
+watches ONLY two user-chosen lists — "noise" apps (the distracting ones:
+dating apps, feeds) and Messages — and is blind to everything else on the
+device (news, maps, FaceTime, WhatsApp, work apps). Each flagged app has a
+per-app toggle: tracked or paused, without losing the list.
+
+**NoiseGate never blocks anything.** The user has a separate blocking app;
+this one is pure awareness — budgets, gauges, and friendly notification
+check-ins. Do not add shields, enforcement, hiding of apps, or blocking of
+any kind. That is a product decision, not a missing feature.
+
+**Tone is warm and wry, never scolding.** Check-ins read like a considerate
+friend ("Half of today's noise budget used. Just so you know."), not a drill
+sergeant. No ALL-CAPS threats, no guilt-tripping, no time-sensitive/critical
+interruption levels. Keep it this way.
 
 ## Repo map
 
 ```
 project.yml                     XcodeGen spec — SINGLE source of truth for all
-                                7 targets, entitlements, and Info.plists
+                                6 targets, entitlements, and Info.plists
 Shared/                         Compiled into EVERY target (both platforms).
   AppGroup.swift                App-group id + UserDefaults keys + day keys
-  BudgetConfig.swift            User settings (budgets, quiet hours) + threshold constants
+  BudgetConfig.swift            Budgets + threshold percent constants
   UsageSnapshot.swift           Widget-facing daily summary (see "floor" below)
-  DesignSystem.swift            NG tokens: colors, typography, HazardStripes, cards
+  DesignSystem.swift            NG tokens: colors, typography, cards, stripes
   BudgetGauge.swift             The budget ring used by apps + widgets
 iOS/
-  App/                          SwiftUI app (custom tab shell: Today/Blocking/Budgets)
-  ScreenTimeShared/             FamilyControls/ManagedSettings helpers — iOS app,
-                                monitor, and shield targets ONLY (needs entitlement)
-  MonitorExtension/             DeviceActivityMonitor: thresholds → nudges/shields
+  App/                          SwiftUI app (custom tab shell: Today/Noise/Budgets)
+  ScreenTimeShared/             FamilyControls selection + muted-token store —
+                                iOS app and monitor targets ONLY (needs entitlement)
+  MonitorExtension/             DeviceActivityMonitor: thresholds → gentle nudges
   ReportExtension/              DeviceActivityReport: renders exact usage (sandboxed)
-  ShieldConfigExtension/        The red "STOP." block screen
   Widget/                       WidgetKit widget (home + lock screen)
 macOS/
-  App/                          Menu-bar app: tracker, nudges, enforcement, slam overlay
+  App/                          Menu-bar app: frontmost-app tracker + nudges
   Widget/                       macOS widget
 ```
 
@@ -61,44 +69,47 @@ macOS/
    **floor**: the monitor extension writes `UsageSnapshot` minutes equal to the
    highest crossed threshold (10% steps of the budget). Fields are labeled
    `isFloor` and rendered with "≥". Never present floor values as exact.
-3. **Threshold events encode meaning in their names**: `"noise.p80"` =
+3. **Muted tokens = paused, not deleted.** `SelectionStore` keeps each
+   selection plus a `MutedTokens` set. Monitoring events and report filters are
+   built from the *active* sets (`ScreenTimeModel.activeNoiseApps` etc.), so a
+   paused app is invisible to tracking. `applyChanges()` prunes muted tokens
+   no longer in the selection. The tokens are opaque; UI renders them with
+   `Label(token)`, which shows the real name/icon via the system.
+4. **Threshold events encode meaning in their names**: `"noise.p80"` =
    noise budget 80% crossed; `"msg.p150"` = messages 150%. Parsing lives in
    the monitor extension (`components(separatedBy: ".p")`). Percent lists come
    from `BudgetConfig.progressPercents` / `.overtimePercents`; keep the app's
    event registration (`ScreenTimeModel.restartMonitoring`) and the monitor's
    handling in sync if you change them.
-4. **Shield state is a set of reasons** (`focus` / `budget` / `quiet`)
-   persisted in app-group defaults; the shield stays up while the set is
-   non-empty. Both the app and the monitor extension mutate it through
-   `ShieldController` only. The `ManagedSettingsStore` name is `"noisegate"`.
-5. **Messaging is never blocked.** Nudges yes, shields no. This is a product
-   invariant, not an oversight.
-6. **The Mac app is intentionally NOT sandboxed** (it hides other apps for
-   enforcement, impossible from the sandbox) and has no Screen Time API — it
-   samples the frontmost app every 5s while input is recent (<2 min idle) and
-   counts only flagged bundle ids. The Mac **widget** IS sandboxed. Don't
-   "fix" either.
-7. **Day rollover** is keyed by `DayKey.today()` (local `yyyy-MM-dd`). On iOS
-   the monitor's `intervalDidStart(daily)` resets the snapshot and lifts the
-   budget shield; on Mac `rolloverIfNeeded()` does it. Both must keep working
-   after any storage change.
-8. Restarting monitoring (`stopMonitoring` + `startMonitoring`) resets
-   DeviceActivity threshold accumulation mid-day — known Apple quirk. Don't
-   add code that restarts monitoring more often than a real settings change.
+5. **The Mac app has no Screen Time API** — it samples the frontmost app every
+   5s while input is recent (<2 min idle) and counts only flagged bundle ids.
+   Both Mac targets are sandboxed. Default messaging bundle ids are Apple
+   Messages only (`com.apple.MobileSMS` / `com.apple.iChat`) — FaceTime and
+   WhatsApp deliberately untracked unless the user flags them.
+6. **Day rollover** is keyed by `DayKey.today()` (local `yyyy-MM-dd`). On iOS
+   the monitor's `intervalDidStart(daily)` resets the snapshot; on Mac
+   `rolloverIfNeeded()` does it. Both must keep working after any storage
+   change.
+7. Restarting monitoring (`stopMonitoring` + `startMonitoring`) resets
+   DeviceActivity threshold accumulation mid-day — known Apple quirk. Toggling
+   an app tracked/paused restarts monitoring by design; don't add extra
+   restart paths.
+8. Nudges fire at most once per day each (iOS: notification id includes the
+   day key; Mac: `macNudgesSent` ledger). Keep that dedupe when touching
+   notification code.
 
 ## Design system (UI work)
 
 - All colors/typography come from `Shared/DesignSystem.swift` (`NG.*` tokens,
   `Font.ngDisplay/ngNumber/ngLabel`). **No raw color or font literals in
   views.** Light/dark is handled inside the tokens.
-- Visual language: warm paper ground, alarm red + deep red for the over/blocked
-  world, orange = noise, teal = messages, indigo = focus. Condensed-black caps
-  for display type ("STOP."), heavy rounded for numerals, tracked small caps
-  for labels. `HazardStripes` marks over-budget surfaces. Cards via `.ngCard()`.
-- Copy voice: second person, blunt, a little funny, short sentences with hard
-  periods ("Put. It. Down."). Nudges escalate — never make them politer.
-- Respect `prefers-reduced-motion` equivalents: gate repeat/looping animations
-  where possible; haptics via `.sensoryFeedback` (iOS only).
+- Visual language: warm paper ground; orange = noise, teal = messages; alarm
+  red appears only as an accent for the over-budget state. Condensed-black
+  caps for display type, heavy rounded for numerals, tracked small caps for
+  labels, `.ngCard()` surfaces. `HazardStripes` is reserved for over-budget
+  fills — use it sparingly.
+- Copy voice: second person, warm, lightly wry, informative ("Tomorrow resets
+  the count."). Never shame the user; never threaten; never promise blocking.
 
 ## Conventions
 

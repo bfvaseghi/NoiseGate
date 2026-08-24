@@ -86,9 +86,9 @@ struct NoiseGateWidgetView: View {
         case .accessoryRectangular:
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Image(systemName: snap.focusActive ? "moon.fill" : "waveform.slash")
-                    Text(noiseOver ? "OVER BUDGET" : "NoiseGate")
-                        .font(.headline.weight(noiseOver ? .black : .semibold))
+                    Image(systemName: "waveform.slash")
+                    Text(noiseOver ? "Over budget" : "NoiseGate")
+                        .font(.headline.weight(.semibold))
                 }
                 Text("Noise ≥\(snap.noiseMinutes)m / \(snap.noiseBudgetMinutes)m")
                     .font(.caption)
@@ -100,19 +100,8 @@ struct NoiseGateWidgetView: View {
             HStack(spacing: 20) {
                 gauges(size: 92)
                 VStack(alignment: .leading, spacing: 7) {
-                    if noiseOver {
-                        Text("YOU'RE\nOVER.")
-                            .font(.ngDisplay(26))
-                            .lineSpacing(-2)
-                    } else {
-                        Label(
-                            snap.focusActive ? "Focus on" : "Focus off",
-                            systemImage: snap.focusActive ? "moon.fill" : "moon"
-                        )
-                        .font(.ngLabel(11))
-                        .tracking(1)
-                        .foregroundStyle(snap.focusActive ? NG.focus : .secondary)
-                    }
+                    Text(noiseOver ? "OVER." : "NOISE.")
+                        .font(.ngDisplay(26))
                     Text(statusLine)
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -151,8 +140,8 @@ struct NoiseGateWidgetView: View {
         if noiseOver {
             let over = snap.noiseMinutes - snap.noiseBudgetMinutes
             return over > 0
-                ? "≥\(over.asHoursMinutes) OVER. You know what to do."
-                : "Budget SPENT. You know what to do."
+                ? "≥\(over.asHoursMinutes) past your line. Tomorrow resets."
+                : "You've hit today's line. Tomorrow resets."
         }
         let left = snap.noiseBudgetMinutes - snap.noiseMinutes
         return "≤\(left.asHoursMinutes) of noise left today."

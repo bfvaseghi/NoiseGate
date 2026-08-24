@@ -1,43 +1,25 @@
 import DeviceActivity
-import ManagedSettings
 import UserNotifications
 import WidgetKit
 import Foundation
 
-/// Runs in the background, woken by the system when a DeviceActivity interval
-/// starts/ends or a usage threshold is crossed. This is where budgets turn
-/// into nudges and shields.
+/// Runs in the background, woken by the system when the daily interval starts
+/// or a usage threshold is crossed. NoiseGate never blocks anything — this is
+/// purely awareness: update the widget, and check in with a friendly note at
+/// the budget milestones.
 class NoiseGateMonitor: DeviceActivityMonitor {
 
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
-        switch activity.rawValue {
-        case "daily":
-            // A new day: reset the widget snapshot and lift any budget shield.
-            let config = BudgetConfig.load()
-            var snap = UsageSnapshot()
-            snap.noiseBudgetMinutes = config.noiseBudgetMinutes
-            snap.messagesBudgetMinutes = config.messagesBudgetMinutes
-            snap.isFloor = true
-            snap.focusActive = ShieldController.activeReasons().contains(.focus)
-            snap.save()
-            ShieldController.remove(.budget)
-            WidgetCenter.shared.reloadAllTimelines()
-        case "quietHours":
-            ShieldController.add(.quiet)
-            notify(id: "quiet.start",
-                   title: "Quiet hours 🌙",
-                   body: "Noise apps are off the table until morning.")
-        default:
-            break
-        }
-    }
-
-    override func intervalDidEnd(for activity: DeviceActivityName) {
-        super.intervalDidEnd(for: activity)
-        if activity.rawValue == "quietHours" {
-            ShieldController.remove(.quiet)
-        }
+        guard activity.rawValue == "daily" else { return }
+        // A new day: reset the widget snapshot.
+        let config = BudgetConfig.load()
+        var snap = UsageSnapshot()
+        snap.noiseBudgetMinutes = config.noiseBudgetMinutes
+        snap.messagesBudgetMinutes = config.messagesBudgetMinutes
+        snap.isFloor = true
+        snap.save()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     override func eventDidReachThreshold(
@@ -61,24 +43,20 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
 
-        // Escalating overtime nags past 100% (only reachable while unblocked —
-        // a shielded app can't accumulate more usage).
+        // Gentle check-ins past 100%.
         if percent > 100 {
-            let over = percent - 100
             if kind == "noise" {
-                let bodies: [Int: String] = [
-                    110: "10% past your noise budget. That word doesn't mean what you think it means.",
-                    125: "A quarter over budget. Put. It. Down.",
-                    150: "That's 1.5× your noise budget. This is an intervention.",
-                    200: "DOUBLE your noise budget. NoiseGate is officially judging you."
-                ]
-                notify(id: "noise.\(percent)", title: "⛔️ \(over)% OVER on noise",
-                       body: bodies[percent] ?? "You're \(over)% over your noise budget.",
-                       critical: true)
+                notify(id: "noise.\(percent)",
+                       title: percent >= 200 ? "Noise check-in" : "Still scrolling?",
+                       body: percent >= 200
+                        ? "You're at double your usual noise line today. No judgment — just flagging it."
+                        : "You're about 50% past your noise line for today. Maybe a good stopping point?")
             } else {
-                notify(id: "msg.\(percent)", title: "💬 \(over)% over on messages",
-                       body: "You're \(over)% past your messaging budget. Still not blocking you — but come on.",
-                       critical: true)
+                notify(id: "msg.\(percent)",
+                       title: "Messages check-in",
+                       body: percent >= 200
+                        ? "Messaging is at double your usual line today."
+                        : "You're well past your usual messaging time today. Might be a call by now?")
             }
             return
         }
@@ -88,52 +66,39 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         if kind == "noise" {
             switch percent {
             case 50:
-                notify(id: "noise.50", title: "⚠️ HALF the noise budget — gone",
-                       body: "That's half of \(config.noiseBudgetMinutes.asHoursMinutes) on apps you yourself called worthless. Worth it?")
+                notify(id: "noise.50", title: "Halfway there",
+                       body: "You've used half of today's noise budget (\(config.noiseBudgetMinutes.asHoursMinutes)). Just so you know.")
             case 80:
-                notify(id: "noise.80", title: "🚨 80% burned",
-                       body: "About \(max(1, config.noiseBudgetMinutes / 5).asHoursMinutes) of noise left. Land the plane NOW.",
-                       critical: true)
+                notify(id: "noise.80", title: "80% of your noise budget used",
+                       body: "About \(max(1, config.noiseBudgetMinutes / 5).asHoursMinutes) left today, if you're keeping score.")
             case 100:
-                if config.blockNoiseAtBudget {
-                    ShieldController.add(.budget)
-                    notify(id: "noise.100", title: "⛔️ DONE. Noise is BLOCKED.",
-                           body: "Budget spent. The wall is up until midnight. Go be a person.",
-                           critical: true)
-                } else {
-                    notify(id: "noise.100", title: "⛔️ Noise budget SPENT",
-                           body: "Past \(config.noiseBudgetMinutes.asHoursMinutes) of noise today. Blocking is off — that was your call.",
-                           critical: true)
-                }
+                notify(id: "noise.100", title: "That's today's noise budget",
+                       body: "You've hit \(config.noiseBudgetMinutes.asHoursMinutes). Nothing gets blocked — this is just your line in the sand.")
             default:
                 break
             }
         } else if kind == "msg" {
             switch percent {
             case 50:
-                notify(id: "msg.50", title: "💬 Messages: halfway",
+                notify(id: "msg.50", title: "Messages: halfway",
                        body: "Half of today's messaging budget used.")
             case 80:
-                notify(id: "msg.80", title: "💬 Messages at 80%",
-                       body: "You've been in messages a while. Just call them.")
+                notify(id: "msg.80", title: "Messages at 80%",
+                       body: "You've been in messages a while today.")
             case 100:
-                notify(id: "msg.100", title: "💬 Messages budget SPENT",
-                       body: "Over \(config.messagesBudgetMinutes.asHoursMinutes) of messaging today. Never blocked — but you said you wanted to know.",
-                       critical: true)
+                notify(id: "msg.100", title: "That's your Messages budget",
+                       body: "Over \(config.messagesBudgetMinutes.asHoursMinutes) of messaging today. Maybe wrap up the thread?")
             default:
                 break
             }
         }
     }
 
-    /// `critical` bumps the interruption level to time-sensitive so the nudge
-    /// punches through scheduled summaries and most Focus modes.
-    private func notify(id: String, title: String, body: String, critical: Bool = false) {
+    private func notify(id: String, title: String, body: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
-        content.interruptionLevel = critical ? .timeSensitive : .active
         let request = UNNotificationRequest(
             identifier: "noisegate.\(id).\(DayKey.today())",
             content: content,

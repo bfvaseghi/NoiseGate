@@ -10,7 +10,6 @@ struct UsageSnapshot: Codable, Equatable {
     var messagesBudgetMinutes: Int = 60
     /// True when minutes are threshold floors ("at least"), as on iOS.
     var isFloor: Bool = false
-    var focusActive: Bool = false
     var updatedAt: Date = Date()
 
     var noiseFraction: Double {
@@ -33,8 +32,7 @@ struct UsageSnapshot: Codable, Equatable {
             snap = UsageSnapshot(
                 noiseBudgetMinutes: config.noiseBudgetMinutes,
                 messagesBudgetMinutes: config.messagesBudgetMinutes,
-                isFloor: snap.isFloor,
-                focusActive: snap.focusActive
+                isFloor: snap.isFloor
             )
         }
         return snap

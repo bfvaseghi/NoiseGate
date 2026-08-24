@@ -6,7 +6,7 @@
 #   2. Change the bundleIdPrefix (and the app-group id in Shared/AppGroup.swift +
 #      the entitlements below) from com.example.noisegate to your own identifier.
 #   3. In your Apple Developer account, enable the Family Controls capability for
-#      the iOS app + monitor/report/shield extension identifiers.
+#      the iOS app + monitor/report extension identifiers.
 
 name: NoiseGate
 options:
@@ -54,17 +54,15 @@ targets:
       path: iOS/App/NoiseGate.entitlements
       properties:
         com.apple.developer.family-controls: true
-        com.apple.developer.usernotifications.time-sensitive: true
         com.apple.security.application-groups:
           - group.com.example.noisegate
     dependencies:
       - target: NoiseGateMonitor
       - target: NoiseGateReport
-      - target: NoiseGateShieldUI
       - target: NoiseGateWidget
 
-  # DeviceActivityMonitor extension: fires at budget thresholds, applies shields,
-  # posts nudges, updates the widget snapshot.
+  # DeviceActivityMonitor extension: fires at budget thresholds, posts gentle
+  # nudge notifications, updates the widget snapshot. Never blocks anything.
   NoiseGateMonitor:
     type: app-extension
     platform: iOS
@@ -87,7 +85,6 @@ targets:
       path: iOS/MonitorExtension/NoiseGateMonitor.entitlements
       properties:
         com.apple.developer.family-controls: true
-        com.apple.developer.usernotifications.time-sensitive: true
         com.apple.security.application-groups:
           - group.com.example.noisegate
 
@@ -111,32 +108,6 @@ targets:
           EXExtensionPointIdentifier: com.apple.deviceactivityui.report-extension
     entitlements:
       path: iOS/ReportExtension/NoiseGateReport.entitlements
-      properties:
-        com.apple.developer.family-controls: true
-        com.apple.security.application-groups:
-          - group.com.example.noisegate
-
-  # Shield configuration extension: custom look for the block screen.
-  NoiseGateShieldUI:
-    type: app-extension
-    platform: iOS
-    sources:
-      - iOS/ShieldConfigExtension
-      - iOS/ScreenTimeShared
-      - Shared
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.shieldui
-        TARGETED_DEVICE_FAMILY: "1,2"
-    info:
-      path: iOS/ShieldConfigExtension/Info.plist
-      properties:
-        CFBundleDisplayName: NoiseGate Shield
-        NSExtension:
-          NSExtensionPointIdentifier: com.apple.ManagedSettingsUI.shield-configuration-service
-          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShieldConfigExtension
-    entitlements:
-      path: iOS/ShieldConfigExtension/NoiseGateShieldUI.entitlements
       properties:
         com.apple.developer.family-controls: true
         com.apple.security.application-groups:
@@ -185,9 +156,9 @@ targets:
     entitlements:
       path: macOS/App/NoiseGateMac.entitlements
       properties:
-        # Deliberately NOT sandboxed: hiding/terminating other apps for
-        # enforcement is not possible from the sandbox. Direct distribution only.
-        com.apple.developer.usernotifications.time-sensitive: true
+        # Sandboxed: with enforcement gone, the app only observes the
+        # frontmost app and posts notifications — nothing needs to escape.
+        com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
           - group.com.example.noisegate
     dependencies:

@@ -14,9 +14,10 @@ enum AppGroup {
 enum StoreKey {
     static let budgetConfig = "budgetConfig"        // BudgetConfig JSON
     static let usageSnapshot = "usageSnapshot"      // UsageSnapshot JSON (widget feed)
-    static let shieldReasons = "shieldReasons"      // [String] of ShieldReason rawValues
     static let noiseSelection = "noiseSelection"    // FamilyActivitySelection JSON (iOS)
     static let messagesSelection = "messagesSelection"
+    static let mutedNoise = "mutedNoise"            // MutedTokens JSON (iOS) — paused noise apps
+    static let mutedMessages = "mutedMessages"      // MutedTokens JSON (iOS)
     static let macNoiseApps = "macNoiseApps"        // [String] bundle ids (macOS)
     static let macMessagesApps = "macMessagesApps"  // [String] bundle ids (macOS)
     static let macLedger = "macLedger"              // MacLedger JSON (macOS)

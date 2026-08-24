@@ -1,16 +1,14 @@
 import Foundation
 import SwiftUI
 import FamilyControls
-import DeviceActivity
 import ManagedSettings
+import DeviceActivity
 import UserNotifications
 import WidgetKit
 
 extension DeviceActivityName {
     /// All-day monitoring window carrying the budget threshold events.
     static let daily = Self("daily")
-    /// Scheduled quiet-hours window during which noise apps are shielded.
-    static let quietHours = Self("quietHours")
 }
 
 /// Event names encode category + percent so the monitor extension can decode
@@ -19,24 +17,34 @@ enum ThresholdEvent {
     static func name(kind: String, percent: Int) -> DeviceActivityEvent.Name {
         DeviceActivityEvent.Name("\(kind).p\(percent)")
     }
-
-    static func parse(_ name: DeviceActivityEvent.Name) -> (kind: String, percent: Int)? {
-        let parts = name.rawValue.components(separatedBy: ".p")
-        guard parts.count == 2, let pct = Int(parts[1]) else { return nil }
-        return (parts[0], pct)
-    }
 }
 
 @MainActor
 final class ScreenTimeModel: ObservableObject {
     @Published var noiseSelection: FamilyActivitySelection = SelectionStore.noise()
     @Published var messagesSelection: FamilyActivitySelection = SelectionStore.messages()
+    @Published var mutedNoise: MutedTokens = SelectionStore.mutedNoise()
+    @Published var mutedMessages: MutedTokens = SelectionStore.mutedMessages()
     @Published var config: BudgetConfig = BudgetConfig.load()
     @Published var isAuthorized: Bool = AuthorizationCenter.shared.authorizationStatus == .approved
-    @Published var focusOn: Bool = ShieldController.activeReasons().contains(.focus)
     @Published var lastError: String?
 
     private let center = DeviceActivityCenter()
+
+    // MARK: - Active (non-muted) token sets
+
+    var activeNoiseApps: Set<ApplicationToken> {
+        noiseSelection.applicationTokens.subtracting(mutedNoise.applications)
+    }
+    var activeNoiseCategories: Set<ActivityCategoryToken> {
+        noiseSelection.categoryTokens.subtracting(mutedNoise.categories)
+    }
+    var activeMessagesApps: Set<ApplicationToken> {
+        messagesSelection.applicationTokens.subtracting(mutedMessages.applications)
+    }
+    var activeMessagesCategories: Set<ActivityCategoryToken> {
+        messagesSelection.categoryTokens.subtracting(mutedMessages.categories)
+    }
 
     // MARK: - Authorization
 
@@ -52,37 +60,54 @@ final class ScreenTimeModel: ObservableObject {
         }
     }
 
-    // MARK: - Focus
+    // MARK: - Per-app toggles (paused, not deleted)
 
-    func toggleFocus() {
-        focusOn.toggle()
-        if focusOn {
-            ShieldController.add(.focus)
-        } else {
-            ShieldController.remove(.focus)
-        }
-        var snap = UsageSnapshot.loadToday()
-        snap.focusActive = focusOn
-        snap.save()
-        WidgetCenter.shared.reloadAllTimelines()
+    func setNoiseApp(_ token: ApplicationToken, tracked: Bool) {
+        if tracked { mutedNoise.applications.remove(token) }
+        else { mutedNoise.applications.insert(token) }
+        applyChanges()
+    }
+
+    func setNoiseCategory(_ token: ActivityCategoryToken, tracked: Bool) {
+        if tracked { mutedNoise.categories.remove(token) }
+        else { mutedNoise.categories.insert(token) }
+        applyChanges()
+    }
+
+    func setMessagesApp(_ token: ApplicationToken, tracked: Bool) {
+        if tracked { mutedMessages.applications.remove(token) }
+        else { mutedMessages.applications.insert(token) }
+        applyChanges()
+    }
+
+    func setMessagesCategory(_ token: ActivityCategoryToken, tracked: Bool) {
+        if tracked { mutedMessages.categories.remove(token) }
+        else { mutedMessages.categories.insert(token) }
+        applyChanges()
     }
 
     // MARK: - Persist + (re)schedule
 
-    /// Saves selections and config, refreshes the shield to cover the current
-    /// noise selection, and restarts DeviceActivity monitoring with fresh
-    /// threshold events. Call after any selection or budget change.
+    /// Saves selections, muted sets, and config, then restarts DeviceActivity
+    /// monitoring with threshold events built from the *active* tokens only.
+    /// Muted apps are invisible to monitoring — nothing about them is recorded.
     func applyChanges() {
+        // Prune muted tokens whose apps were removed from the selection.
+        mutedNoise.applications.formIntersection(noiseSelection.applicationTokens)
+        mutedNoise.categories.formIntersection(noiseSelection.categoryTokens)
+        mutedMessages.applications.formIntersection(messagesSelection.applicationTokens)
+        mutedMessages.categories.formIntersection(messagesSelection.categoryTokens)
+
         SelectionStore.saveNoise(noiseSelection)
         SelectionStore.saveMessages(messagesSelection)
+        SelectionStore.saveMutedNoise(mutedNoise)
+        SelectionStore.saveMutedMessages(mutedMessages)
         config.save()
-        ShieldController.refresh()
 
         var snap = UsageSnapshot.loadToday()
         snap.noiseBudgetMinutes = config.noiseBudgetMinutes
         snap.messagesBudgetMinutes = config.messagesBudgetMinutes
         snap.isFloor = true
-        snap.focusActive = focusOn
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
 
@@ -93,60 +118,40 @@ final class ScreenTimeModel: ObservableObject {
     private func restartMonitoring() {
         center.stopMonitoring()
 
-        // 1. All-day window with threshold events at every 10% of each budget.
-        //    The 10% steps double as widget progress; 50/80/100 also nudge.
         var events: [DeviceActivityEvent.Name: DeviceActivityEvent] = [:]
         let allPercents = BudgetConfig.progressPercents + BudgetConfig.overtimePercents
-        if !noiseSelection.isEmpty {
+
+        if !activeNoiseApps.isEmpty || !activeNoiseCategories.isEmpty {
             for pct in allPercents {
                 events[ThresholdEvent.name(kind: "noise", percent: pct)] = DeviceActivityEvent(
-                    applications: noiseSelection.applicationTokens,
-                    categories: noiseSelection.categoryTokens,
+                    applications: activeNoiseApps,
+                    categories: activeNoiseCategories,
                     webDomains: noiseSelection.webDomainTokens,
                     threshold: DateComponents(minute: max(1, config.noiseBudgetMinutes * pct / 100))
                 )
             }
         }
-        if !messagesSelection.isEmpty {
+        if !activeMessagesApps.isEmpty || !activeMessagesCategories.isEmpty {
             for pct in allPercents {
                 events[ThresholdEvent.name(kind: "msg", percent: pct)] = DeviceActivityEvent(
-                    applications: messagesSelection.applicationTokens,
-                    categories: messagesSelection.categoryTokens,
+                    applications: activeMessagesApps,
+                    categories: activeMessagesCategories,
                     webDomains: messagesSelection.webDomainTokens,
                     threshold: DateComponents(minute: max(1, config.messagesBudgetMinutes * pct / 100))
                 )
             }
         }
 
+        guard !events.isEmpty else { return }
         let allDay = DeviceActivitySchedule(
             intervalStart: DateComponents(hour: 0, minute: 0),
             intervalEnd: DateComponents(hour: 23, minute: 59),
             repeats: true
         )
         do {
-            if !events.isEmpty {
-                try center.startMonitoring(.daily, during: allDay, events: events)
-            }
+            try center.startMonitoring(.daily, during: allDay, events: events)
         } catch {
-            lastError = "Could not start daily monitoring: \(error.localizedDescription)"
-        }
-
-        // 2. Quiet hours window (shield applied in the monitor extension).
-        if config.quietHoursEnabled, !noiseSelection.isEmpty {
-            let quiet = DeviceActivitySchedule(
-                intervalStart: DateComponents(hour: config.quietStartMinutes / 60,
-                                              minute: config.quietStartMinutes % 60),
-                intervalEnd: DateComponents(hour: config.quietEndMinutes / 60,
-                                            minute: config.quietEndMinutes % 60),
-                repeats: true
-            )
-            do {
-                try center.startMonitoring(.quietHours, during: quiet, events: [:])
-            } catch {
-                lastError = "Could not schedule quiet hours: \(error.localizedDescription)"
-            }
-        } else {
-            ShieldController.remove(.quiet)
+            lastError = "Could not start monitoring: \(error.localizedDescription)"
         }
     }
 }
@@ -154,13 +159,5 @@ final class ScreenTimeModel: ObservableObject {
 extension FamilyActivitySelection {
     var isEmpty: Bool {
         applicationTokens.isEmpty && categoryTokens.isEmpty && webDomainTokens.isEmpty
-    }
-
-    var summary: String {
-        var parts: [String] = []
-        if !applicationTokens.isEmpty { parts.append("\(applicationTokens.count) apps") }
-        if !categoryTokens.isEmpty { parts.append("\(categoryTokens.count) categories") }
-        if !webDomainTokens.isEmpty { parts.append("\(webDomainTokens.count) websites") }
-        return parts.isEmpty ? "Nothing selected" : parts.joined(separator: ", ")
     }
 }
