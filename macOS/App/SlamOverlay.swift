@@ -53,15 +53,17 @@ struct SlamView: View {
             LinearGradient(colors: [.red, Color(red: 0.55, green: 0, blue: 0)],
                            startPoint: .top, endPoint: .bottom)
                 .opacity(0.92)
-            VStack(spacing: 18) {
+            HazardStripes(opacity: 0.07, lineWidth: 22, gap: 60)
+            VStack(spacing: 20) {
                 Image(systemName: "hand.raised.fill")
-                    .font(.system(size: 90, weight: .black))
+                    .font(.system(size: 84, weight: .black))
                 Text("NOPE.")
-                    .font(.system(size: 110, weight: .black, design: .rounded))
-                Text("\(appName) is blocked. \(reason)")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .font(.ngDisplay(170))
+                Text("\(appName.uppercased()) IS BLOCKED. \(reason.uppercased())")
+                    .font(.ngLabel(17))
+                    .tracking(2.5)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 60)
+                    .padding(.horizontal, 80)
             }
             .foregroundStyle(.white)
         }

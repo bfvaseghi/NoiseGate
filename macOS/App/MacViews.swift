@@ -3,33 +3,76 @@ import SwiftUI
 struct MenuView: View {
     @EnvironmentObject private var model: MacModel
 
+    private var noiseOver: Bool {
+        model.noiseMinutesToday >= model.config.noiseBudgetMinutes
+    }
+
     var body: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 20) {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("NOISEGATE")
+                    .font(.ngLabel(10))
+                    .tracking(2.5)
+                    .foregroundStyle(NG.alarm)
+                Text("TODAY.")
+                    .font(.ngDisplay(30))
+                    .foregroundStyle(NG.ink)
+            }
+
+            if noiseOver {
+                Text("YOU'RE OVER.")
+                    .font(.ngDisplay(16))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(
+                        ZStack {
+                            NG.overBannerGradient
+                            HazardStripes(opacity: 0.1, lineWidth: 6, gap: 12)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    )
+            }
+
+            HStack(spacing: 18) {
                 BudgetGauge(
                     title: "Noise",
                     minutes: model.noiseMinutesToday,
                     budgetMinutes: model.config.noiseBudgetMinutes,
-                    tint: .orange
+                    tint: NG.noise,
+                    size: 96
                 )
-                .frame(width: 90, height: 110)
                 BudgetGauge(
                     title: "Messages",
                     minutes: model.messagesMinutesToday,
                     budgetMinutes: model.config.messagesBudgetMinutes,
-                    tint: .teal
+                    tint: NG.msg,
+                    size: 96
                 )
-                .frame(width: 90, height: 110)
             }
+            .frame(maxWidth: .infinity)
 
-            Toggle(isOn: Binding(
-                get: { model.focusOn },
-                set: { model.setFocus($0) }
-            )) {
-                Label("Focus now", systemImage: "moon.fill")
+            // Compact version of the iOS focus slab.
+            Button {
+                model.setFocus(!model.focusOn)
+            } label: {
+                HStack {
+                    Image(systemName: model.focusOn ? "moon.fill" : "moon")
+                        .font(.system(size: 14, weight: .black))
+                    Text(model.focusOn ? "FOCUSED — TAP TO END" : "FOCUS NOW")
+                        .font(.ngLabel(11))
+                        .tracking(1.5)
+                    Spacer()
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .background(
+                    model.focusOn ? AnyShapeStyle(NG.focusGradient) : AnyShapeStyle(NG.ink),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
             }
-            .toggleStyle(.switch)
-            .tint(.indigo)
+            .buttonStyle(.plain)
 
             if model.enforcementActive {
                 Text(model.focusOn
@@ -37,9 +80,8 @@ struct MenuView: View {
                         : model.inQuietHours
                             ? "Quiet hours — noise apps are hidden."
                             : "Noise budget spent — noise apps are hidden.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(NG.inkSoft)
             }
 
             Divider()
@@ -58,7 +100,8 @@ struct MenuView: View {
             .controlSize(.small)
         }
         .padding(16)
-        .frame(width: 260)
+        .frame(width: 280)
+        .background(NG.paper)
     }
 }
 

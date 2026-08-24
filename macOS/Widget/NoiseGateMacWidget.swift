@@ -57,13 +57,15 @@ struct MacWidgetView: View {
         if noiseOver {
             content
                 .containerBackground(for: .widget) {
-                    LinearGradient(colors: [.red, Color(red: 0.6, green: 0, blue: 0)],
-                                   startPoint: .top, endPoint: .bottom)
+                    ZStack {
+                        NG.alarmGradient
+                        HazardStripes(opacity: 0.08)
+                    }
                 }
                 .environment(\.colorScheme, .dark)
         } else {
             content
-                .containerBackground(.background, for: .widget)
+                .containerBackground(NG.paper, for: .widget)
         }
     }
 
@@ -73,26 +75,35 @@ struct MacWidgetView: View {
                 title: "Noise",
                 minutes: snap.noiseMinutes,
                 budgetMinutes: snap.noiseBudgetMinutes,
-                tint: .orange
+                tint: NG.noise,
+                size: family == .systemMedium ? 92 : 64
             )
             BudgetGauge(
-                title: "Messages",
+                title: "Msgs",
                 minutes: snap.messagesMinutes,
                 budgetMinutes: snap.messagesBudgetMinutes,
-                tint: .teal
+                tint: NG.msg,
+                size: family == .systemMedium ? 92 : 64
             )
             if family == .systemMedium {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(
-                        snap.focusActive ? "Focus on" : "Focus off",
-                        systemImage: snap.focusActive ? "moon.fill" : "moon"
-                    )
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(snap.focusActive ? Color.indigo : .secondary)
+                VStack(alignment: .leading, spacing: 7) {
+                    if noiseOver {
+                        Text("YOU'RE\nOVER.")
+                            .font(.ngDisplay(26))
+                            .lineSpacing(-2)
+                    } else {
+                        Label(
+                            snap.focusActive ? "Focus on" : "Focus off",
+                            systemImage: snap.focusActive ? "moon.fill" : "moon"
+                        )
+                        .font(.ngLabel(11))
+                        .tracking(1)
+                        .foregroundStyle(snap.focusActive ? NG.focus : .secondary)
+                    }
                     Text(noiseOver
                             ? "OVER by \((snap.noiseMinutes - snap.noiseBudgetMinutes).asHoursMinutes). You know what to do."
                             : "\((snap.noiseBudgetMinutes - snap.noiseMinutes).asHoursMinutes) of noise left.")
-                        .font(noiseOver ? .caption2.weight(.bold) : .caption2)
+                        .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(noiseOver ? .primary : .secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

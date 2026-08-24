@@ -1,20 +1,52 @@
 import SwiftUI
 import FamilyControls
 
+// MARK: - Root: custom tab shell over the three screens
+
+enum NGTab: String, CaseIterable, Identifiable {
+    case today, blocking, budgets
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .today: return "Today"
+        case .blocking: return "Blocking"
+        case .budgets: return "Budgets"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .today: return "gauge.with.needle"
+        case .blocking: return "hand.raised.fill"
+        case .budgets: return "slider.horizontal.3"
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @State private var tab: NGTab = .today
 
     var body: some View {
         Group {
             if model.isAuthorized {
-                TabView {
-                    TodayView()
-                        .tabItem { Label("Today", systemImage: "gauge.with.needle") }
-                    BlockingView()
-                        .tabItem { Label("Blocking", systemImage: "shield.lefthalf.filled") }
-                    SettingsView()
-                        .tabItem { Label("Budgets", systemImage: "slider.horizontal.3") }
+                ZStack(alignment: .bottom) {
+                    Group {
+                        switch tab {
+                        case .today: TodayView()
+                        case .blocking: BlockingView()
+                        case .budgets: SettingsView()
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    NGTabBar(selection: $tab)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 8)
                 }
+                .background(NG.paper.ignoresSafeArea())
+                .sensoryFeedback(.selection, trigger: tab)
             } else {
                 OnboardingView()
             }
@@ -30,41 +62,114 @@ struct ContentView: View {
     }
 }
 
-struct OnboardingView: View {
-    @EnvironmentObject private var model: ScreenTimeModel
+/// Floating capsule tab bar with a sliding alarm-red pill.
+struct NGTabBar: View {
+    @Binding var selection: NGTab
+    @Namespace private var pill
 
     var body: some View {
-        VStack(spacing: 24) {
+        HStack(spacing: 4) {
+            ForEach(NGTab.allCases) { tab in
+                Button {
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        selection = tab
+                    }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 16, weight: .bold))
+                        Text(tab.label.uppercased())
+                            .font(.ngLabel(9))
+                            .tracking(1.2)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .foregroundStyle(selection == tab ? .white : NG.inkSoft)
+                    .background {
+                        if selection == tab {
+                            Capsule()
+                                .fill(NG.alarm)
+                                .matchedGeometryEffect(id: "pill", in: pill)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(5)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(NG.line, lineWidth: 1))
+        .shadow(color: NG.ink.opacity(0.12), radius: 18, y: 8)
+        .frame(maxWidth: 420)
+    }
+}
+
+// MARK: - Onboarding: the poster
+
+struct OnboardingView: View {
+    @EnvironmentObject private var model: ScreenTimeModel
+    @State private var revealed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
             Spacer()
+
             Image(systemName: "waveform.slash")
-                .font(.system(size: 64))
-                .foregroundStyle(.tint)
-            Text("NoiseGate")
-                .font(.largeTitle.bold())
-            Text("""
-            Screen Time counts everything — even the apps you're *supposed* to use. \
-            NoiseGate only watches the apps you flag as noise, tracks messaging \
-            separately, and nudges you when you drift.
-            """)
-            .multilineTextAlignment(.center)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal)
+                .font(.system(size: 40, weight: .black))
+                .foregroundStyle(NG.alarm)
+                .padding(.bottom, 28)
+                .symbolEffect(.pulse, options: .repeating, isActive: revealed)
+
+            VStack(alignment: .leading, spacing: -6) {
+                PosterLine("CUT")
+                PosterLine("THE")
+                PosterLine("NOISE", accent: true)
+            }
+            .padding(.bottom, 24)
+
+            Text("Screen Time counts everything — even the apps you're supposed to use. NoiseGate watches only the apps you flag as noise, tracks messaging separately, and gets loud when you drift.")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(NG.inkSoft)
+                .frame(maxWidth: 340, alignment: .leading)
+
             Spacer()
+
             Button {
                 Task { await model.requestAuthorization() }
             } label: {
                 Text("Allow Screen Time access")
+                    .font(.system(size: 17, weight: .bold))
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
+                    .padding(.vertical, 17)
+                    .background(NG.alarmGradient, in: Capsule())
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding()
-            Text("NoiseGate never sees which apps you pick — Apple's Screen Time keeps the list opaque, even to this app.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            .buttonStyle(.plain)
+            .padding(.bottom, 14)
+
+            Text("NoiseGate never sees which apps you pick — Apple keeps the list opaque, even to this app.")
+                .font(.ngLabel(11))
+                .foregroundStyle(NG.inkSoft.opacity(0.8))
+                .frame(maxWidth: .infinity, alignment: .center)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
-                .padding(.bottom)
+                .padding(.bottom, 8)
         }
+        .padding(28)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(NG.paper.ignoresSafeArea())
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.1)) {
+                revealed = true
+            }
+        }
+    }
+
+    private func PosterLine(_ text: String, accent: Bool = false) -> some View {
+        (Text(text).foregroundColor(accent ? NG.alarm : NG.ink)
+            + Text(".").foregroundColor(accent ? NG.ink : NG.alarm))
+            .font(.ngDisplay(84))
+            .opacity(revealed ? 1 : 0)
+            .offset(y: revealed ? 0 : 14)
     }
 }

@@ -91,49 +91,71 @@ struct LoudActivityView: View {
         budgetMinutes > 0 ? min(1, Double(minutes) / Double(budgetMinutes)) : 0
     }
 
+    private var tint: Color { kind == .noise ? NG.noise : NG.msg }
+    private var barColor: Color { overBudget ? NG.alarm : tint }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(minutes.asHoursMinutes)
-                    .font(.system(size: 44, weight: .black, design: .rounded))
-                    .foregroundStyle(overBudget ? .red : (kind == .noise ? .orange : .teal))
+                    .font(.ngNumber(46))
+                    .foregroundStyle(overBudget ? NG.alarm : NG.ink)
+                    .contentTransition(.numericText())
                 Text("/ \(budgetMinutes.asHoursMinutes)")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.ngLabel(13))
+                    .tracking(1)
+                    .foregroundStyle(NG.inkSoft)
                 Spacer()
                 if overBudget {
                     Text("OVER")
-                        .font(.caption.weight(.black))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.red, in: Capsule())
+                        .font(.ngLabel(10))
+                        .tracking(2)
                         .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(NG.alarm, in: Capsule())
                 }
             }
 
-            ProgressView(value: fraction)
-                .tint(overBudget ? .red : (kind == .noise ? .orange : .teal))
-                .scaleEffect(y: 2, anchor: .center)
+            // Thick budget bar; hazard stripes bleed through once you're over.
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(barColor.opacity(0.14))
+                    Capsule()
+                        .fill(barColor)
+                        .frame(width: max(10, geo.size.width * fraction))
+                        .overlay {
+                            if overBudget { HazardStripes(opacity: 0.22, lineWidth: 5, gap: 9) }
+                        }
+                        .clipShape(Capsule())
+                }
+            }
+            .frame(height: 12)
 
             if summary.topApps.isEmpty {
                 Text(kind == .noise
                         ? "Zero noise so far. Keep it that way."
                         : "No messaging yet today.")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NG.inkSoft)
             } else {
-                ForEach(summary.topApps, id: \.name) { app in
-                    HStack {
-                        Text(app.name).font(.footnote.weight(.medium))
-                        Spacer()
-                        Text(Int(app.duration / 60).asHoursMinutes)
-                            .font(.footnote.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                VStack(spacing: 5) {
+                    ForEach(summary.topApps, id: \.name) { app in
+                        HStack {
+                            Circle().fill(tint).frame(width: 6, height: 6)
+                            Text(app.name)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(NG.ink)
+                            Spacer()
+                            Text(Int(app.duration / 60).asHoursMinutes)
+                                .font(.ngNumber(13))
+                                .foregroundStyle(NG.inkSoft)
+                        }
                     }
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

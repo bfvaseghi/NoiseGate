@@ -59,14 +59,16 @@ struct NoiseGateWidgetView: View {
         if noiseOver, family == .systemSmall || family == .systemMedium {
             content
                 .containerBackground(for: .widget) {
-                    LinearGradient(colors: [.red, Color(red: 0.6, green: 0, blue: 0)],
-                                   startPoint: .top, endPoint: .bottom)
+                    ZStack {
+                        NG.alarmGradient
+                        HazardStripes(opacity: 0.08)
+                    }
                 }
                 // Dark scheme so text and gauges render light on the red slab.
                 .environment(\.colorScheme, .dark)
         } else {
             content
-                .containerBackground(.background, for: .widget)
+                .containerBackground(NG.paper, for: .widget)
         }
     }
 
@@ -96,42 +98,51 @@ struct NoiseGateWidgetView: View {
 
         case .systemMedium:
             HStack(spacing: 20) {
-                gauges
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(
-                        snap.focusActive ? "Focus on" : "Focus off",
-                        systemImage: snap.focusActive ? "moon.fill" : "moon"
-                    )
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(snap.focusActive ? Color.indigo : .secondary)
+                gauges(size: 92)
+                VStack(alignment: .leading, spacing: 7) {
+                    if noiseOver {
+                        Text("YOU'RE\nOVER.")
+                            .font(.ngDisplay(26))
+                            .lineSpacing(-2)
+                    } else {
+                        Label(
+                            snap.focusActive ? "Focus on" : "Focus off",
+                            systemImage: snap.focusActive ? "moon.fill" : "moon"
+                        )
+                        .font(.ngLabel(11))
+                        .tracking(1)
+                        .foregroundStyle(snap.focusActive ? NG.focus : .secondary)
+                    }
                     Text(statusLine)
-                        .font(.caption2)
+                        .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 2)
 
         default: // systemSmall
-            gauges
+            gauges(size: 64)
         }
     }
 
-    private var gauges: some View {
-        HStack(spacing: 14) {
+    private func gauges(size: CGFloat) -> some View {
+        HStack(spacing: 12) {
             BudgetGauge(
                 title: "Noise",
                 minutes: snap.noiseMinutes,
                 budgetMinutes: snap.noiseBudgetMinutes,
-                tint: .orange,
-                isFloor: snap.isFloor
+                tint: NG.noise,
+                isFloor: snap.isFloor,
+                size: size
             )
             BudgetGauge(
-                title: "Messages",
+                title: "Msgs",
                 minutes: snap.messagesMinutes,
                 budgetMinutes: snap.messagesBudgetMinutes,
-                tint: .teal,
-                isFloor: snap.isFloor
+                tint: NG.msg,
+                isFloor: snap.isFloor,
+                size: size
             )
         }
     }

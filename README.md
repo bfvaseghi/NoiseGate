@@ -13,6 +13,12 @@ cares about two things, and it is not subtle about either of them:
 
 Everything else on your devices is none of this app's business.
 
+> **Contributing (humans or AI agents):** read [AGENTS.md](AGENTS.md) first —
+> repo map, build steps, architecture invariants, and the design-system rules.
+> The visual identity (alarm-poster red on warm paper, condensed-black display
+> type, hazard stripes for the over state) lives in
+> `Shared/DesignSystem.swift`; all UI draws from those `NG.*` tokens.
+
 ## What's in the box
 
 | Target | What it does |
