@@ -93,8 +93,10 @@ macOS/
    the monitor's `intervalDidStart(daily)` resets the snapshot; on Mac
    `rolloverIfNeeded()` does it. Both file the finished day into
    `HistoryStore` *before* resetting (iOS reads the raw stored snapshot, not
-   `loadToday()`, which would already have reset it). Both must keep working
-   after any storage change.
+   `loadToday()`, which would already have reset it). CRITICAL:
+   `intervalDidStart` ALSO fires on every mid-day monitoring restart (any
+   settings/toggle change) — it must return early when the stored snapshot's
+   dayKey is already today, or it wipes the day's floor and nudge ledger.
 6b. **Report contexts are string-matched** between the host views and the
    report extension: "Noise", "Messages", "Noise Week", "Messages Week".
    The week scenes render exact 7-day Swift Charts inside the privacy
@@ -107,9 +109,13 @@ macOS/
    budgets — keep that pattern when adding fields.
 7. Restarting monitoring (`stopMonitoring` + `startMonitoring`) resets
    DeviceActivity threshold accumulation mid-day — known Apple quirk. That's
-   why `ScreenTimeModel.applyChanges()` persists immediately but debounces
-   the restart (0.8s): rapid stepper taps or toggle flips coalesce into one
-   restart. Don't add undebounced restart paths.
+   why `ScreenTimeModel.applyChanges()` persists immediately but defers the
+   expensive side effects (`syncDeferred()`: snapshot write + widget reload +
+   restart) behind a 0.8s debounce, so rapid stepper taps or toggle flips
+   coalesce into one sync. Don't add undebounced restart/reload paths.
+   DeviceActivityReport filters must also stay value-stable across renders
+   (day-boundary interval ends, never `.now`) or the report re-queries on
+   every SwiftUI body evaluation.
 8. Notifications fire at most once per day per milestone, enforced by
    sent-key ledgers (`iosNudgesSent` / `macNudgesSent`), which also covers
    thresholds re-firing after a mid-day monitoring restart. The daily reset

@@ -89,20 +89,20 @@ final class ScreenTimeModel: ObservableObject {
 
     // MARK: - Persist + (re)schedule
 
-    /// Persists immediately, then restarts DeviceActivity monitoring after a
-    /// short debounce. Persistence is cheap and must never be lost; the
-    /// monitoring restart is expensive AND resets Apple's threshold
-    /// accumulation for the day, so rapid edits (stepper taps, toggle flips)
-    /// coalesce into one restart. Muted apps are excluded from the events —
+    /// Persists immediately, then runs the expensive side effects (widget
+    /// snapshot + timeline reload, DeviceActivity restart) after a short
+    /// debounce. Persistence is cheap and must never be lost; the restart
+    /// resets Apple's threshold accumulation for the day, and the widget
+    /// reload is systemwide — so rapid edits (stepper taps, toggle flips)
+    /// coalesce into one sync. Muted apps are excluded from the events —
     /// nothing about them is recorded.
     func applyChanges() {
         persist()
-        guard isAuthorized else { return }
         restartTask?.cancel()
         restartTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            self?.restartMonitoring()
+            self?.syncDeferred()
         }
     }
 
@@ -118,13 +118,18 @@ final class ScreenTimeModel: ObservableObject {
         SelectionStore.saveMutedNoise(mutedNoise)
         SelectionStore.saveMutedMessages(mutedMessages)
         config.save()
+    }
 
+    private func syncDeferred() {
         var snap = UsageSnapshot.loadToday()
         snap.noiseBudgetMinutes = config.noiseBudgetMinutes
         snap.messagesBudgetMinutes = config.messagesBudgetMinutes
         snap.isFloor = true
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
+
+        guard isAuthorized else { return }
+        restartMonitoring()
     }
 
     private func restartMonitoring() {

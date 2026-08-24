@@ -41,19 +41,25 @@ final class MacModel: ObservableObject {
     }
     @Published var noiseBundleIDs: Set<String>
     @Published var messagesBundleIDs: Set<String>
-    @Published var noiseSecondsToday: Double = 0
-    @Published var messagesSecondsToday: Double = 0
+    /// Published at minute granularity so the menu bar and popover re-render
+    /// once a minute, not on every 5-second tick.
+    @Published private(set) var noiseMinutesToday = 0
+    @Published private(set) var messagesMinutesToday = 0
     @Published var installedApps: [DiscoveredApp] = []
 
+    private var noiseSecondsToday: Double = 0
+    private var messagesSecondsToday: Double = 0
     private var ledger = MacLedger.loadToday()
     private var timer: Timer?
     private var ticksSincePersist = 0
     private let tickSeconds: Double = 5
     /// Stop counting after 2 minutes without keyboard/mouse input.
     private let idleCutoff: Double = 120
-
-    var noiseMinutesToday: Int { Int(noiseSecondsToday / 60) }
-    var messagesMinutesToday: Int { Int(messagesSecondsToday / 60) }
+    /// In-memory mirror of the once-per-day nudge ledger, so the tick loop
+    /// doesn't re-read UserDefaults for every crossed milestone.
+    private var nudgesSentToday = Set(
+        AppGroup.defaults.stringArray(forKey: StoreKey.macNudgesSent) ?? []
+    )
 
     init() {
         noiseBundleIDs = Set(AppGroup.defaults.stringArray(forKey: StoreKey.macNoiseApps) ?? [])
@@ -143,6 +149,7 @@ final class MacModel: ObservableObject {
         ))
         ledger = MacLedger()
         ledger.save()
+        nudgesSentToday = []
         AppGroup.defaults.set([String](), forKey: StoreKey.macNudgesSent)
         recomputeTotals()
         publishSnapshot()
@@ -178,6 +185,11 @@ final class MacModel: ObservableObject {
         messagesSecondsToday = ledger.seconds
             .filter { messagesBundleIDs.contains($0.key) }
             .values.reduce(0, +)
+        // Publish only whole-minute changes.
+        let noiseMinutes = Int(noiseSecondsToday / 60)
+        let messagesMinutes = Int(messagesSecondsToday / 60)
+        if noiseMinutes != noiseMinutesToday { noiseMinutesToday = noiseMinutes }
+        if messagesMinutes != messagesMinutesToday { messagesMinutesToday = messagesMinutes }
     }
 
     /// Minimum idle time across common input event types (safer than the
@@ -215,10 +227,9 @@ final class MacModel: ObservableObject {
     /// Sends each distinct nudge at most once per day.
     private func notifyOnce(id: String, title: String, body: String) {
         let key = "\(id)@\(DayKey.today())"
-        var sent = AppGroup.defaults.stringArray(forKey: StoreKey.macNudgesSent) ?? []
-        guard !sent.contains(key) else { return }
-        sent.append(key)
-        AppGroup.defaults.set(sent, forKey: StoreKey.macNudgesSent)
+        guard !nudgesSentToday.contains(key) else { return }
+        nudgesSentToday.insert(key)
+        AppGroup.defaults.set(Array(nudgesSentToday), forKey: StoreKey.macNudgesSent)
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -243,6 +254,19 @@ final class MacModel: ObservableObject {
         snap.noiseBudgetMinutes = config.noiseBudgetMinutes
         snap.messagesBudgetMinutes = config.messagesBudgetMinutes
         snap.isFloor = false
+
+        // Skip the write + widget reload when nothing visible changed —
+        // this runs once a minute from the tick loop. Compare against the
+        // raw stored value (not loadToday(), whose auto-reset would mask a
+        // stale previous-day snapshot on disk).
+        if let current = AppGroup.defaults.codable(UsageSnapshot.self, forKey: StoreKey.usageSnapshot),
+           current.dayKey == snap.dayKey,
+           current.noiseMinutes == snap.noiseMinutes,
+           current.messagesMinutes == snap.messagesMinutes,
+           current.noiseBudgetMinutes == snap.noiseBudgetMinutes,
+           current.messagesBudgetMinutes == snap.messagesBudgetMinutes {
+            return
+        }
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
     }

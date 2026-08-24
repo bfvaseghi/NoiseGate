@@ -22,6 +22,7 @@ enum StatsRange: String, CaseIterable, Identifiable {
 struct TodayView: View {
     @EnvironmentObject private var model: ScreenTimeModel
     @State private var snapshot = UsageSnapshot.loadToday()
+    @State private var history: [DayRecord] = HistoryStore.lastDays(6)
     @State private var range: StatsRange = .today
 
     private let refresh = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -31,12 +32,15 @@ struct TodayView: View {
             ?? DateInterval(start: .now, duration: 3600)
     }
 
+    /// Last 7 calendar days, ending at tonight's midnight. Using the day
+    /// boundary (not `.now`) keeps the filter stable across renders, so the
+    /// report extension isn't re-queried on every 30s snapshot refresh.
     private var weekInterval: DateInterval {
         let calendar = Calendar.current
         let start = calendar.startOfDay(
             for: calendar.date(byAdding: .day, value: -6, to: .now) ?? .now
         )
-        return DateInterval(start: start, end: .now)
+        return DateInterval(start: start, end: todayInterval.end)
     }
 
     private func filter(
@@ -132,7 +136,7 @@ struct TodayView: View {
                     }
                 }
 
-                HistoryStatsCard(todaySnapshot: snapshot)
+                HistoryStatsCard(finishedDays: history, todaySnapshot: snapshot)
 
                 Text("Only listed apps are counted. Nothing is blocked.")
                     .font(.ngLabel(11.5))
@@ -147,8 +151,14 @@ struct TodayView: View {
         }
         .scrollIndicators(.hidden)
         .background(NG.paper.ignoresSafeArea())
-        .onAppear { snapshot = UsageSnapshot.loadToday() }
-        .onReceive(refresh) { _ in snapshot = UsageSnapshot.loadToday() }
+        .onAppear {
+            snapshot = UsageSnapshot.loadToday()
+            history = HistoryStore.lastDays(6)
+        }
+        .onReceive(refresh) { _ in
+            snapshot = UsageSnapshot.loadToday()
+            history = HistoryStore.lastDays(6)
+        }
     }
 
     private func budgetLabel(_ minutes: Int) -> String {
@@ -255,10 +265,11 @@ struct OverBudgetBanner: View {
 /// "Budget reached on N of the last M days" — from the rollover history plus
 /// today's snapshot. Values are threshold floors on iOS, marked accordingly.
 struct HistoryStatsCard: View {
+    let finishedDays: [DayRecord]
     let todaySnapshot: UsageSnapshot
 
     private var records: [DayRecord] {
-        var records = HistoryStore.lastDays(6)
+        var records = finishedDays
         records.append(DayRecord(
             dayKey: todaySnapshot.dayKey,
             noiseMinutes: todaySnapshot.noiseMinutes,

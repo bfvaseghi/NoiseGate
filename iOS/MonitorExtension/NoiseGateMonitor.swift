@@ -13,10 +13,15 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         super.intervalDidStart(for: activity)
         guard activity.rawValue == "daily" else { return }
 
-        // File the finished day into history before resetting. Read the raw
-        // stored snapshot — loadToday() would already have reset it.
-        if let previous = AppGroup.defaults.codable(UsageSnapshot.self, forKey: StoreKey.usageSnapshot),
-           previous.dayKey != DayKey.today() {
+        // This also fires when monitoring restarts mid-day (every settings or
+        // toggle change): the stored snapshot is still today's, and its floor
+        // and the nudge ledger must survive — only a true day change resets.
+        // Read the raw stored snapshot; loadToday() would already have reset it.
+        let previous = AppGroup.defaults.codable(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
+        if let previous, previous.dayKey == DayKey.today() { return }
+
+        // File the finished day into history before resetting.
+        if let previous {
             HistoryStore.record(DayRecord(
                 dayKey: previous.dayKey,
                 noiseMinutes: previous.noiseMinutes,

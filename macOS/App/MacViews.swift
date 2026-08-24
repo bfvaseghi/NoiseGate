@@ -53,34 +53,10 @@ struct MenuView: View {
                     .foregroundStyle(NG.inkSoft)
             }
 
-            if model.weekRecords.count >= 2 {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("NOISE · LAST \(model.weekRecords.count) DAYS")
-                        .font(.ngLabel(9))
-                        .tracking(1.5)
-                        .foregroundStyle(NG.inkSoft)
-                    Chart {
-                        ForEach(model.weekRecords) { day in
-                            BarMark(
-                                x: .value("Day", day.date, unit: .day),
-                                y: .value("Minutes", day.noiseMinutes)
-                            )
-                            .foregroundStyle(day.noiseReachedBudget ? NG.alarm : NG.noise)
-                            .cornerRadius(3)
-                        }
-                        RuleMark(y: .value("Budget", model.config.noiseBudgetMinutes))
-                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                            .foregroundStyle(NG.inkSoft)
-                    }
-                    .chartXAxis {
-                        AxisMarks(values: .stride(by: .day)) { _ in
-                            AxisValueLabel(format: .dateTime.weekday(.narrow))
-                        }
-                    }
-                    .chartYAxis(.hidden)
-                    .frame(height: 64)
-                }
-            }
+            MacWeekChart(
+                records: model.weekRecords,
+                budgetMinutes: model.config.noiseBudgetMinutes
+            )
 
             Divider()
 
@@ -100,6 +76,45 @@ struct MenuView: View {
         .padding(16)
         .frame(width: 280)
         .background(NG.paper)
+    }
+}
+
+/// 7-day noise mini chart for the menu popover. Takes the records once so the
+/// model's computed history isn't rebuilt per subview access.
+struct MacWeekChart: View {
+    let records: [DayRecord]
+    let budgetMinutes: Int
+
+    var body: some View {
+        // One day of data isn't a trend yet.
+        if records.count >= 2 {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("NOISE · LAST \(records.count) DAYS")
+                    .font(.ngLabel(9))
+                    .tracking(1.5)
+                    .foregroundStyle(NG.inkSoft)
+                Chart {
+                    ForEach(records) { day in
+                        BarMark(
+                            x: .value("Day", day.date, unit: .day),
+                            y: .value("Minutes", day.noiseMinutes)
+                        )
+                        .foregroundStyle(day.noiseReachedBudget ? NG.alarm : NG.noise)
+                        .cornerRadius(3)
+                    }
+                    RuleMark(y: .value("Budget", budgetMinutes))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        .foregroundStyle(NG.inkSoft)
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .day)) { _ in
+                        AxisValueLabel(format: .dateTime.weekday(.narrow))
+                    }
+                }
+                .chartYAxis(.hidden)
+                .frame(height: 64)
+            }
+        }
     }
 }
 
