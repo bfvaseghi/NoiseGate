@@ -216,28 +216,27 @@ struct WeekCrossingStrip: View {
         var body: some View {
             GeometryReader { geo in
                 ZStack(alignment: .bottom) {
+                    let track = RoundedRectangle(cornerRadius: 4, style: .continuous)
                     switch day.status {
                     case .noRecord:
                         // Outline only: nothing was recorded for this day.
-                        Capsule()
-                            .strokeBorder(NG.line, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                        track.strokeBorder(
+                            NG.line,
+                            style: StrokeStyle(lineWidth: 1, dash: [2, 2])
+                        )
                     case .noCheckpoint:
-                        Capsule().fill(NG.line.opacity(0.5))
+                        track.fill(NG.line.opacity(0.5))
                     case .zero:
-                        Capsule().fill(NG.line.opacity(0.5))
-                        Capsule()
-                            .fill(tint.opacity(0.55))
-                            .frame(height: 3)
+                        track.fill(NG.line.opacity(0.5))
+                        track.fill(tint.opacity(0.55)).frame(height: 3)
                     case .checkpoint:
-                        Capsule().fill(NG.line.opacity(0.5))
-                        Capsule()
-                            .fill(tint)
-                            .frame(height: max(4, geo.size.height * day.fraction))
+                        track.fill(NG.line.opacity(0.5))
+                        track.fill(tint)
+                            .frame(height: max(5, geo.size.height * day.fraction))
                     case .reached, .over:
-                        Capsule().fill(NG.line.opacity(0.5))
-                        Capsule()
-                            .fill(NG.alarm)
-                            .frame(height: max(6, geo.size.height * max(0.6, day.fraction)))
+                        track.fill(NG.line.opacity(0.5))
+                        track.fill(NG.alarm)
+                            .frame(height: max(7, geo.size.height * max(0.6, day.fraction)))
                     }
                 }
             }
@@ -284,13 +283,13 @@ struct MediumSignalLayout: View {
         VStack(alignment: .leading, spacing: 8) {
             WidgetHeader(presentation: primary)
             HStack(spacing: 16) {
-                ledgerColumn(primary, ringSize: 82, emphasised: true)
+                ledgerColumn(primary, ringSize: 78, emphasised: true)
                 if let secondary {
                     Rectangle()
                         .fill(NG.line)
                         .frame(width: 1)
                         .accessibilityHidden(true)
-                    ledgerColumn(secondary, ringSize: 74, emphasised: false)
+                    ledgerColumn(secondary, ringSize: 78, emphasised: false)
                 } else {
                     Rectangle()
                         .fill(NG.line)
@@ -370,10 +369,12 @@ struct LargeSignalLayout: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            Spacer(minLength: 0)
             Divider()
 
             WeekCrossingStrip(summary: summary, ledger: primary.ledger)
 
+            Spacer(minLength: 0)
             Text("Only selected apps are counted. Nothing is blocked.")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
