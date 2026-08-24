@@ -1,0 +1,203 @@
+# XcodeGen spec — run `xcodegen generate` in this folder to produce NoiseGate.xcodeproj
+# Requires: https://github.com/yonaskolb/XcodeGen  (brew install xcodegen)
+#
+# BEFORE BUILDING:
+#   1. Set DEVELOPMENT_TEAM below to your Apple Team ID.
+#   2. Change the bundleIdPrefix (and the app-group id in Shared/AppGroup.swift +
+#      the entitlements below) from com.example.noisegate to your own identifier.
+#   3. In your Apple Developer account, enable the Family Controls capability for
+#      the iOS app + monitor/report/shield extension identifiers.
+
+name: NoiseGate
+options:
+  bundleIdPrefix: com.example.noisegate
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: "YOURTEAMID"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+
+  # ────────────────────────────── iOS app ──────────────────────────────
+  NoiseGate:
+    type: application
+    platform: iOS
+    sources:
+      - iOS/App
+      - iOS/ScreenTimeShared
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate
+        INFOPLIST_KEY_CFBundleDisplayName: NoiseGate
+    info:
+      path: iOS/App/Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        ITSAppUsesNonExemptEncryption: false
+    entitlements:
+      path: iOS/App/NoiseGate.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
+    dependencies:
+      - target: NoiseGateMonitor
+      - target: NoiseGateReport
+      - target: NoiseGateShieldUI
+      - target: NoiseGateWidget
+
+  # DeviceActivityMonitor extension: fires at budget thresholds, applies shields,
+  # posts nudges, updates the widget snapshot.
+  NoiseGateMonitor:
+    type: app-extension
+    platform: iOS
+    sources:
+      - iOS/MonitorExtension
+      - iOS/ScreenTimeShared
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.monitor
+    info:
+      path: iOS/MonitorExtension/Info.plist
+      properties:
+        CFBundleDisplayName: NoiseGate Monitor
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NoiseGateMonitor
+    entitlements:
+      path: iOS/MonitorExtension/NoiseGateMonitor.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
+
+  # DeviceActivityReport extension: renders exact on-screen time for the
+  # Noise and Messages selections inside the app (privacy-preserving).
+  NoiseGateReport:
+    type: extensionkit-extension
+    platform: iOS
+    sources:
+      - iOS/ReportExtension
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.report
+    info:
+      path: iOS/ReportExtension/Info.plist
+      properties:
+        CFBundleDisplayName: NoiseGate Report
+        EXAppExtensionAttributes:
+          EXExtensionPointIdentifier: com.apple.deviceactivityui.report-extension
+    entitlements:
+      path: iOS/ReportExtension/NoiseGateReport.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
+
+  # Shield configuration extension: custom look for the block screen.
+  NoiseGateShieldUI:
+    type: app-extension
+    platform: iOS
+    sources:
+      - iOS/ShieldConfigExtension
+      - iOS/ScreenTimeShared
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.shieldui
+    info:
+      path: iOS/ShieldConfigExtension/Info.plist
+      properties:
+        CFBundleDisplayName: NoiseGate Shield
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.ManagedSettingsUI.shield-configuration-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShieldConfigExtension
+    entitlements:
+      path: iOS/ShieldConfigExtension/NoiseGateShieldUI.entitlements
+      properties:
+        com.apple.developer.family-controls: true
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
+
+  # Home-screen / lock-screen widget.
+  NoiseGateWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - iOS/Widget
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.widget
+    info:
+      path: iOS/Widget/Info.plist
+      properties:
+        CFBundleDisplayName: NoiseGate Widget
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: iOS/Widget/NoiseGateWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
+
+  # ────────────────────────────── macOS app ──────────────────────────────
+  NoiseGateMac:
+    type: application
+    platform: macOS
+    sources:
+      - macOS/App
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.mac
+        INFOPLIST_KEY_CFBundleDisplayName: NoiseGate
+        ENABLE_HARDENED_RUNTIME: true
+    info:
+      path: macOS/App/Info.plist
+      properties:
+        LSUIElement: true   # menu-bar app, no Dock icon
+        CFBundleDisplayName: NoiseGate
+    entitlements:
+      path: macOS/App/NoiseGateMac.entitlements
+      properties:
+        # Deliberately NOT sandboxed: hiding/terminating other apps for
+        # enforcement is not possible from the sandbox. Direct distribution only.
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
+    dependencies:
+      - target: NoiseGateMacWidget
+
+  NoiseGateMacWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - macOS/Widget
+      - Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.mac.widget
+    info:
+      path: macOS/Widget/Info.plist
+      properties:
+        CFBundleDisplayName: NoiseGate Widget
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: macOS/Widget/NoiseGateMacWidget.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - group.com.example.noisegate
