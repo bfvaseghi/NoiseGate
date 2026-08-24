@@ -12,14 +12,15 @@ device (news, maps, FaceTime, WhatsApp, work apps). Each flagged app has a
 per-app toggle: tracked or paused, without losing the list.
 
 **NoiseGate never blocks anything.** The user has a separate blocking app;
-this one is pure awareness — budgets, gauges, and friendly notification
-check-ins. Do not add shields, enforcement, hiding of apps, or blocking of
-any kind. That is a product decision, not a missing feature.
+this one is observation only — budgets, gauges, and threshold notifications.
+Do not add shields, enforcement, hiding of apps, or blocking of any kind.
+That is a product decision, not a missing feature.
 
-**Tone is warm and wry, never scolding.** Check-ins read like a considerate
-friend ("Half of today's noise budget used. Just so you know."), not a drill
-sergeant. No ALL-CAPS threats, no guilt-tripping, no time-sensitive/critical
-interruption levels. Keep it this way.
+**Tone is neutral and factual.** All user-facing copy states numbers and
+facts, nothing more ("Noise: 80% of budget used. About 9m remaining today.").
+No praise, no scolding, no jokes, no exclamation points, no time-sensitive/
+critical interruption levels. All notification copy lives in
+`Shared/NudgeText.swift` — both platforms use it; edit copy there only.
 
 ## Repo map
 
@@ -29,6 +30,7 @@ project.yml                     XcodeGen spec — SINGLE source of truth for all
 Shared/                         Compiled into EVERY target (both platforms).
   AppGroup.swift                App-group id + UserDefaults keys + day keys
   BudgetConfig.swift            Budgets + threshold percent constants
+  NudgeText.swift               ALL notification copy (both platforms)
   UsageSnapshot.swift           Widget-facing daily summary (see "floor" below)
   DesignSystem.swift            NG tokens: colors, typography, cards, stripes
   BudgetGauge.swift             The budget ring used by apps + widgets
@@ -91,12 +93,14 @@ macOS/
    `rolloverIfNeeded()` does it. Both must keep working after any storage
    change.
 7. Restarting monitoring (`stopMonitoring` + `startMonitoring`) resets
-   DeviceActivity threshold accumulation mid-day — known Apple quirk. Toggling
-   an app tracked/paused restarts monitoring by design; don't add extra
-   restart paths.
-8. Nudges fire at most once per day each (iOS: notification id includes the
-   day key; Mac: `macNudgesSent` ledger). Keep that dedupe when touching
-   notification code.
+   DeviceActivity threshold accumulation mid-day — known Apple quirk. That's
+   why `ScreenTimeModel.applyChanges()` persists immediately but debounces
+   the restart (0.8s): rapid stepper taps or toggle flips coalesce into one
+   restart. Don't add undebounced restart paths.
+8. Notifications fire at most once per day per milestone, enforced by
+   sent-key ledgers (`iosNudgesSent` / `macNudgesSent`), which also covers
+   thresholds re-firing after a mid-day monitoring restart. The daily reset
+   clears both. Keep that dedupe when touching notification code.
 
 ## Design system (UI work)
 
@@ -106,10 +110,9 @@ macOS/
 - Visual language: warm paper ground; orange = noise, teal = messages; alarm
   red appears only as an accent for the over-budget state. Condensed-black
   caps for display type, heavy rounded for numerals, tracked small caps for
-  labels, `.ngCard()` surfaces. `HazardStripes` is reserved for over-budget
-  fills — use it sparingly.
-- Copy voice: second person, warm, lightly wry, informative ("Tomorrow resets
-  the count."). Never shame the user; never threaten; never promise blocking.
+  labels, `.ngCard()` surfaces.
+- Copy voice: neutral and factual everywhere (see the tone rule at the top).
+  State what is tracked, the numbers, and that nothing is blocked.
 
 ## Conventions
 

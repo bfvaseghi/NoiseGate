@@ -117,25 +117,21 @@ struct LoudActivityView: View {
                 }
             }
 
-            // Thick budget bar; hazard stripes bleed through once you're over.
+            // Thick budget bar; turns red once the budget is reached.
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(barColor.opacity(0.14))
                     Capsule()
                         .fill(barColor)
                         .frame(width: max(10, geo.size.width * fraction))
-                        .overlay {
-                            if overBudget { HazardStripes(opacity: 0.22, lineWidth: 5, gap: 9) }
-                        }
-                        .clipShape(Capsule())
                 }
             }
             .frame(height: 12)
 
             if summary.topApps.isEmpty {
                 Text(kind == .noise
-                        ? "Zero noise so far. Keep it that way."
-                        : "No messaging yet today.")
+                        ? "No noise-app usage recorded today."
+                        : "No messaging recorded today.")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(NG.inkSoft)
             } else {

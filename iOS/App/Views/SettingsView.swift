@@ -7,22 +7,22 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 18) {
                 PosterHeader(
-                    eyebrow: "Your lines",
+                    eyebrow: "Daily limits",
                     title: "BUDGETS.",
-                    detail: "Friendly check-ins at 50, 80, and 100%. Nothing is ever blocked."
+                    detail: "Notifications at 50%, 80%, and 100% of each budget."
                 )
                 .padding(.top, 8)
 
                 BudgetDial(
                     chip: "Noise", tint: NG.noise,
                     minutes: model.config.noiseBudgetMinutes,
-                    caption: "Per day, across iPhone and iPad."
+                    caption: "Daily limit for the apps on the noise list."
                 ) { adjust(\.noiseBudgetMinutes, by: $0) }
 
                 BudgetDial(
                     chip: "Messages", tint: NG.msg,
                     minutes: model.config.messagesBudgetMinutes,
-                    caption: "Tracked separately, on its own line."
+                    caption: "Daily limit for Messages, tracked separately."
                 ) { adjust(\.messagesBudgetMinutes, by: $0) }
 
                 HStack(alignment: .top, spacing: 14) {
@@ -32,10 +32,10 @@ struct SettingsView: View {
                         .frame(width: 38, height: 38)
                         .background(NG.focus, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("How check-ins work")
+                        Text("Notifications")
                             .font(.system(size: 15.5, weight: .bold))
                             .foregroundStyle(NG.ink)
-                        Text("A quiet note at 50%, 80%, and 100% of each budget, and a gentle check-in if a day runs far past the line. That's it — blocking is your other app's job.")
+                        Text("Sent at 50%, 80%, and 100% of each budget, and at 150% and 200% if exceeded — each at most once per day. Nothing is blocked.")
                             .font(.system(size: 12.5, weight: .medium))
                             .foregroundStyle(NG.inkSoft)
                     }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CoreGraphics
 import Foundation
 import UserNotifications
@@ -30,9 +31,9 @@ struct DiscoveredApp: Identifiable, Hashable {
     var id: String { bundleID }
 }
 
-/// Pure observation: samples the frontmost app while you're active, counts
-/// only flagged bundle ids, and posts gentle budget check-ins. No blocking,
-/// no hiding, no judgment — awareness only.
+/// Pure observation: samples the frontmost app while the Mac is in use,
+/// counts only listed bundle ids, and posts factual budget notifications.
+/// No blocking or hiding of any kind.
 @MainActor
 final class MacModel: ObservableObject {
     @Published var config = BudgetConfig.load() {
@@ -66,6 +67,17 @@ final class MacModel: ObservableObject {
         requestNotificationPermission()
         discoverApps()
         startTicking()
+
+        // The ledger normally persists once a minute; flush on quit so up to
+        // 60s of tracked time isn't lost.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.ledger.save()
+            }
+        }
     }
 
     // MARK: - Selection persistence
@@ -170,40 +182,9 @@ final class MacModel: ObservableObject {
         guard budget > 0 else { return }
         let percents = BudgetConfig.nudgePercents + BudgetConfig.overtimePercents
         for pct in percents where minutes * 100 >= budget * pct {
-            let title: String
-            let body: String
-            switch (kind, pct) {
-            case ("noise", 50):
-                title = "Halfway there"
-                body = "Half of today's Mac noise budget (\(budget.asHoursMinutes)) used. Just so you know."
-            case ("noise", 80):
-                title = "80% of your noise budget used"
-                body = "About \(max(0, budget - minutes).asHoursMinutes) left today, if you're keeping score."
-            case ("noise", 100):
-                title = "That's today's noise budget"
-                body = "You've hit \(budget.asHoursMinutes). Nothing gets blocked — this is just your line in the sand."
-            case ("noise", 150):
-                title = "Still scrolling?"
-                body = "You're about 50% past your noise line today. Maybe a good stopping point?"
-            case ("noise", 200):
-                title = "Noise check-in"
-                body = "You're at double your usual noise line today. No judgment — just flagging it."
-            case ("msg", 50):
-                title = "Messages: halfway"
-                body = "Half of today's messaging budget used."
-            case ("msg", 80):
-                title = "Messages at 80%"
-                body = "You've been in messages a while today."
-            case ("msg", 100):
-                title = "That's your Messages budget"
-                body = "Over \(budget.asHoursMinutes) of messaging today. Maybe wrap up the thread?"
-            case ("msg", 150), ("msg", 200):
-                title = "Messages check-in"
-                body = "Messaging is running well past your usual line today. Might be a call by now?"
-            default:
-                continue
-            }
-            notifyOnce(id: "\(kind).\(pct)", title: title, body: body)
+            guard let text = NudgeText.notification(kind: kind, percent: pct,
+                                                    budgetMinutes: budget) else { continue }
+            notifyOnce(id: "\(kind).\(pct)", title: text.title, body: text.body)
         }
     }
 
@@ -244,7 +225,30 @@ final class MacModel: ObservableObject {
 
     // MARK: - App discovery (for the pickers)
 
+    /// Reads running apps on the main actor (NSWorkspace is main-thread
+    /// territory), then scans the Applications folders off the main thread —
+    /// Bundle(url:) over a couple hundred apps is a visible hitch otherwise.
     func discoverApps() {
+        let running = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app in
+                app.bundleIdentifier.map {
+                    DiscoveredApp(bundleID: $0, name: app.localizedName ?? $0)
+                }
+            }
+        Task.detached(priority: .utility) { [weak self] in
+            var found = Self.scanApplicationFolders()
+            for app in running where found[app.bundleID] == nil {
+                found[app.bundleID] = app
+            }
+            let sorted = found.values.sorted {
+                $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+            }
+            await MainActor.run { self?.installedApps = sorted }
+        }
+    }
+
+    private nonisolated static func scanApplicationFolders() -> [String: DiscoveredApp] {
         var found: [String: DiscoveredApp] = [:]
         let fm = FileManager.default
         let dirs = ["/Applications", "/System/Applications", "/System/Applications/Utilities"]
@@ -260,17 +264,6 @@ final class MacModel: ObservableObject {
                 }
             }
         }
-        for app in NSWorkspace.shared.runningApplications
-        where app.activationPolicy == .regular {
-            if let bundleID = app.bundleIdentifier, found[bundleID] == nil {
-                found[bundleID] = DiscoveredApp(
-                    bundleID: bundleID,
-                    name: app.localizedName ?? bundleID
-                )
-            }
-        }
-        installedApps = found.values.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
+        return found
     }
 }

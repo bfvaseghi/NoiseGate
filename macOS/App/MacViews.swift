@@ -39,7 +39,7 @@ struct MenuView: View {
 
             if noiseOver {
                 Label {
-                    Text("Past your noise line for today — tomorrow resets the count.")
+                    Text("Noise is \((model.noiseMinutesToday - model.config.noiseBudgetMinutes).asHoursMinutes) over budget today. Resets at midnight.")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(NG.inkSoft)
                 } icon: {
@@ -47,7 +47,7 @@ struct MenuView: View {
                         .foregroundStyle(NG.alarm)
                 }
             } else {
-                Text("Only flagged apps are counted. Nothing is ever blocked.")
+                Text("Only listed apps are counted. Nothing is blocked.")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(NG.inkSoft)
             }
@@ -82,14 +82,14 @@ struct MacSettingsView: View {
                 .tabItem { Label("Budgets", systemImage: "slider.horizontal.3") }
             AppPickerTab(
                 title: "Noise apps",
-                subtitle: "The distracting stuff. Tracked and budgeted — never blocked. Toggle off to pause.",
+                subtitle: "Apps tracked against the noise budget. Toggle off to pause tracking.",
                 isOn: { model.noiseBundleIDs.contains($0) },
                 toggle: model.toggleNoise
             )
             .tabItem { Label("Noise", systemImage: "waveform.slash") }
             AppPickerTab(
                 title: "Messaging apps",
-                subtitle: "Just Messages, ideally — FaceTime and WhatsApp are real conversation, leave them out.",
+                subtitle: "Apps tracked against the Messages budget. Default: Messages only — FaceTime and WhatsApp are only tracked if you add them.",
                 isOn: { model.messagesBundleIDs.contains($0) },
                 toggle: model.toggleMessages
             )
@@ -109,7 +109,7 @@ struct MacSettingsView: View {
                 }
             }
             Section {
-                Text("Friendly check-ins at 50%, 80%, and 100% of each budget, plus a gentle note if a day runs far past the line. Time only counts while you're actually at the keyboard — idle time is ignored. Nothing is ever blocked.")
+                Text("Notifications at 50%, 80%, and 100% of each budget, and at 150% and 200% if exceeded — each at most once per day. Time only counts while the Mac is in use; after 2 minutes without input, counting stops. Nothing is blocked.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -61,7 +61,8 @@ struct TodayView: View {
 
                 if noiseOver {
                     OverBudgetBanner(
-                        overMinutes: snapshot.noiseMinutes - snapshot.noiseBudgetMinutes
+                        overMinutes: snapshot.noiseMinutes - snapshot.noiseBudgetMinutes,
+                        budgetMinutes: snapshot.noiseBudgetMinutes
                     )
                 }
 
@@ -71,8 +72,8 @@ struct TodayView: View {
                 ) {
                     if !noiseActive {
                         MissingSelectionRow(text: model.noiseSelection.isEmpty
-                            ? "Pick your noise apps in the Noise tab."
-                            : "Everything here is paused right now.")
+                            ? "Add noise apps in the Noise tab."
+                            : "All noise apps are currently paused.")
                     } else {
                         DeviceActivityReport(.noise, filter: filter(
                             apps: model.activeNoiseApps,
@@ -90,7 +91,7 @@ struct TodayView: View {
                     if !messagesActive {
                         MissingSelectionRow(text: model.messagesSelection.isEmpty
                             ? "Add the Messages app in the Noise tab."
-                            : "Messages tracking is paused right now.")
+                            : "Messages tracking is currently paused.")
                     } else {
                         DeviceActivityReport(.messages, filter: filter(
                             apps: model.activeMessagesApps,
@@ -101,7 +102,7 @@ struct TodayView: View {
                     }
                 }
 
-                Text("Only the apps you flagged are counted — nothing here gets blocked, and everything else on this device is none of NoiseGate's business.")
+                Text("Only listed apps are counted. Nothing is blocked.")
                     .font(.ngLabel(11.5))
                     .foregroundStyle(NG.inkSoft)
                     .multilineTextAlignment(.center)
@@ -143,10 +144,11 @@ struct UsageCard<Content: View>: View {
     }
 }
 
-/// A calm heads-up once the noise budget is spent. Informative, not scolding —
-/// and nothing gets blocked.
+/// Status card shown once the noise budget is reached. Factual only —
+/// nothing is blocked.
 struct OverBudgetBanner: View {
     let overMinutes: Int
+    let budgetMinutes: Int
 
     var body: some View {
         HStack(spacing: 14) {
@@ -156,12 +158,12 @@ struct OverBudgetBanner: View {
                 .frame(width: 44, height: 44)
                 .background(NG.alarm, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text("Over your line today")
+                Text("Noise budget reached")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(NG.ink)
                 Text(overMinutes > 0
-                        ? "At least \(overMinutes.asHoursMinutes) past your noise budget. Tomorrow resets the count."
-                        : "You've hit your noise budget. Tomorrow resets the count.")
+                        ? "At least \(overMinutes.asHoursMinutes) over today's \(budgetMinutes.asHoursMinutes) budget. Resets at midnight."
+                        : "Today's \(budgetMinutes.asHoursMinutes) budget is used. Resets at midnight.")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(NG.inkSoft)
             }

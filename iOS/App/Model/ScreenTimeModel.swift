@@ -30,6 +30,7 @@ final class ScreenTimeModel: ObservableObject {
     @Published var lastError: String?
 
     private let center = DeviceActivityCenter()
+    private var restartTask: Task<Void, Never>?
 
     // MARK: - Active (non-muted) token sets
 
@@ -88,10 +89,24 @@ final class ScreenTimeModel: ObservableObject {
 
     // MARK: - Persist + (re)schedule
 
-    /// Saves selections, muted sets, and config, then restarts DeviceActivity
-    /// monitoring with threshold events built from the *active* tokens only.
-    /// Muted apps are invisible to monitoring — nothing about them is recorded.
+    /// Persists immediately, then restarts DeviceActivity monitoring after a
+    /// short debounce. Persistence is cheap and must never be lost; the
+    /// monitoring restart is expensive AND resets Apple's threshold
+    /// accumulation for the day, so rapid edits (stepper taps, toggle flips)
+    /// coalesce into one restart. Muted apps are excluded from the events —
+    /// nothing about them is recorded.
     func applyChanges() {
+        persist()
+        guard isAuthorized else { return }
+        restartTask?.cancel()
+        restartTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 800_000_000)
+            guard !Task.isCancelled else { return }
+            self?.restartMonitoring()
+        }
+    }
+
+    private func persist() {
         // Prune muted tokens whose apps were removed from the selection.
         mutedNoise.applications.formIntersection(noiseSelection.applicationTokens)
         mutedNoise.categories.formIntersection(noiseSelection.categoryTokens)
@@ -110,9 +125,6 @@ final class ScreenTimeModel: ObservableObject {
         snap.isFloor = true
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
-
-        guard isAuthorized else { return }
-        restartMonitoring()
     }
 
     private func restartMonitoring() {

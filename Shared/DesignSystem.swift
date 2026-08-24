@@ -11,9 +11,10 @@ private typealias NativeColor = NSColor
 // MARK: - NG: the NoiseGate design system
 //
 // One visual world across iPhone, iPad, Mac, widgets, and extensions:
-// alarm-poster red on warm paper, condensed-black display type, hazard
-// stripes for the over-budget state. Never use raw color literals in
-// views — pull from these tokens so light/dark stay coherent everywhere.
+// warm paper ground, condensed-black display type, category colors for
+// noise and messages, red reserved for the over-budget state. Never use
+// raw color literals in views — pull from these tokens so light/dark
+// stay coherent everywhere.
 
 enum NG {
     // Grounds
@@ -31,19 +32,9 @@ enum NG {
     static let msg   = Color(light: 0x18988F, dark: 0x2BB3A9)
     static let focus = Color(light: 0x5B5BD6, dark: 0x8181E8)
 
-    /// The red slab used for shields, slams, and over-budget states.
+    /// Primary-action fill (onboarding CTA).
     static var alarmGradient: LinearGradient {
         LinearGradient(colors: [alarm, alarmDeep],
-                       startPoint: .top, endPoint: .bottom)
-    }
-
-    static var overBannerGradient: LinearGradient {
-        LinearGradient(colors: [alarm, noise],
-                       startPoint: .topLeading, endPoint: .bottomTrailing)
-    }
-
-    static var focusGradient: LinearGradient {
-        LinearGradient(colors: [focus, Color(light: 0x3D3DAF, dark: 0x5555C8)],
                        startPoint: .top, endPoint: .bottom)
     }
 }
@@ -79,7 +70,7 @@ private extension NativeColor {
 // MARK: - Typography
 
 extension Font {
-    /// Poster voice: condensed black caps, the "STOP." face.
+    /// Display face: condensed black caps for screen titles.
     static func ngDisplay(_ size: CGFloat) -> Font {
         .system(size: size, weight: .black).width(.condensed)
     }
@@ -96,30 +87,6 @@ extension Font {
 }
 
 // MARK: - Components
-
-/// Diagonal hazard stripes — the texture of the over-budget world.
-struct HazardStripes: View {
-    var color: Color = .white
-    var opacity: Double = 0.12
-    var lineWidth: CGFloat = 10
-    var gap: CGFloat = 20
-
-    var body: some View {
-        Canvas { context, size in
-            let step = lineWidth + gap
-            var x = -size.height
-            while x < size.width + size.height {
-                var path = Path()
-                path.move(to: CGPoint(x: x, y: size.height))
-                path.addLine(to: CGPoint(x: x + size.height, y: 0))
-                context.stroke(path, with: .color(color.opacity(opacity)),
-                               lineWidth: lineWidth)
-                x += step
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
 
 /// Standard NoiseGate card surface.
 struct NGCardStyle: ViewModifier {

@@ -127,7 +127,7 @@ struct OnboardingView: View {
             }
             .padding(.bottom, 24)
 
-            Text("Screen Time counts everything — even the apps you're supposed to use. NoiseGate watches only the apps you flag as noise, tracks Messages separately, and taps you on the shoulder when you drift past your own line. It never blocks anything.")
+            Text("NoiseGate tracks only the apps you list as distracting, plus Messages on its own budget, and sends a notification at set thresholds. Everything else on this device is not tracked, and nothing is ever blocked.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
                 .frame(maxWidth: 340, alignment: .leading)
@@ -147,7 +147,7 @@ struct OnboardingView: View {
             .buttonStyle(.plain)
             .padding(.bottom, 14)
 
-            Text("NoiseGate never sees which apps you pick — Apple keeps the list opaque, even to this app.")
+            Text("App selections stay opaque to NoiseGate — Apple's Screen Time framework keeps the list private, even from this app.")
                 .font(.ngLabel(11))
                 .foregroundStyle(NG.inkSoft.opacity(0.8))
                 .frame(maxWidth: .infinity, alignment: .center)

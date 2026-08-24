@@ -10,9 +10,9 @@ that are actually noise (the swiping, the feeds), and those are the only
 thing it ever measures. Messages gets its own separate line. Everything else
 on your devices is invisible to it.
 
-And it **never blocks anything**. If you want blocking, use a blocking app —
-NoiseGate is the considerate friend who mentions you've been scrolling a
-while, not the bouncer.
+And it **never blocks anything**. NoiseGate is observation only: budgets,
+gauges, and factual threshold notifications. Blocking, if you want it,
+belongs to a dedicated blocking app.
 
 > **Contributing (humans or AI agents):** read [AGENTS.md](AGENTS.md) first —
 > repo map, build steps, architecture invariants, and the design-system rules.
@@ -29,9 +29,9 @@ while, not the bouncer.
   Pause Hinge for a week without losing your list; flip it back on later.
 - **Messages on its own line.** A separate budget and gauge for the Messages
   app, so thread time doesn't blur into feed time.
-- **Friendly check-ins.** A quiet notification at 50%, 80%, and 100% of each
-  budget, and a gentle note if a day runs far past the line (150% / 200%).
-  Each fires at most once a day. No all-caps, no guilt.
+- **Threshold notifications.** A notification at 50%, 80%, and 100% of each
+  budget, and at 150% / 200% if exceeded. Each fires at most once per day,
+  at standard priority, with neutral, factual copy.
 - **Widgets everywhere.** Budget rings on the iPhone/iPad home screen and
   lock screen, and on the Mac desktop / Notification Center.
 - **iPhone, iPad, and Mac.** One iOS app for iPhone and iPad; a menu-bar

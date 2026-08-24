@@ -2,10 +2,9 @@ import SwiftUI
 import FamilyControls
 import ManagedSettings
 
-/// Where you decide what counts. Add apps with Apple's picker, then toggle
-/// each one on (tracked) or off (paused) without losing the list. Apps never
-/// flagged here are completely invisible to NoiseGate — that's the whole
-/// premise: NYT and FaceTime aren't noise; Hinge and the feeds might be.
+/// Where the tracked lists are managed. Add apps with Apple's picker, then
+/// toggle each one on (tracked) or off (paused) without losing the list.
+/// Apps never listed here are invisible to NoiseGate.
 struct NoiseView: View {
     @EnvironmentObject private var model: ScreenTimeModel
     @State private var showNoisePicker = false
@@ -15,9 +14,9 @@ struct NoiseView: View {
         ScrollView {
             VStack(spacing: 18) {
                 PosterHeader(
-                    eyebrow: "What counts",
+                    eyebrow: "Tracked apps",
                     title: "NOISE.",
-                    detail: "Only what's on these lists is ever tracked. Toggle anything off to pause it."
+                    detail: "Only listed apps are tracked. Toggle off to pause tracking."
                 )
                 .padding(.top, 8)
 
@@ -25,8 +24,8 @@ struct NoiseView: View {
                     chip: "Noise", tint: NG.noise,
                     selection: model.noiseSelection,
                     muted: model.mutedNoise,
-                    emptyHint: "Nothing flagged yet. Add the apps that add nothing — the feeds, the swiping, whatever your time disappears into.",
-                    footnote: "The useful stuff — news, maps, notes, work — doesn't belong here, and NoiseGate will never see it.",
+                    emptyHint: "No apps selected. Add the apps to track against the noise budget.",
+                    footnote: "Apps not listed here are never tracked.",
                     addApps: { showNoisePicker = true },
                     setApp: model.setNoiseApp,
                     setCategory: model.setNoiseCategory
@@ -36,8 +35,8 @@ struct NoiseView: View {
                     chip: "Messages", tint: NG.msg,
                     selection: model.messagesSelection,
                     muted: model.mutedMessages,
-                    emptyHint: "Add just the Messages app here to keep an eye on thread time.",
-                    footnote: "Tracked separately, never judged harshly. Leave FaceTime and WhatsApp out — talking to real people isn't noise.",
+                    emptyHint: "Add the Messages app to track messaging time.",
+                    footnote: "Tracked separately with its own budget. FaceTime and WhatsApp are only tracked if you add them.",
                     addApps: { showMessagesPicker = true },
                     setApp: model.setMessagesApp,
                     setCategory: model.setMessagesCategory

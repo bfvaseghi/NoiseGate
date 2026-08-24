@@ -18,6 +18,7 @@ enum StoreKey {
     static let messagesSelection = "messagesSelection"
     static let mutedNoise = "mutedNoise"            // MutedTokens JSON (iOS) — paused noise apps
     static let mutedMessages = "mutedMessages"      // MutedTokens JSON (iOS)
+    static let iosNudgesSent = "iosNudgesSent"      // [String] nudge ids sent today (iOS)
     static let macNoiseApps = "macNoiseApps"        // [String] bundle ids (macOS)
     static let macMessagesApps = "macMessagesApps"  // [String] bundle ids (macOS)
     static let macLedger = "macLedger"              // MacLedger JSON (macOS)
@@ -25,13 +26,20 @@ enum StoreKey {
 }
 
 enum DayKey {
-    /// Local-timezone day key, e.g. "2026-08-24". Everything resets when it changes.
-    static func today(_ date: Date = Date()) -> String {
+    /// DateFormatter is expensive to create and documented thread-safe for
+    /// reads, so build it once — this is called from 5-second timer ticks and
+    /// widget renders.
+    private static let formatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar.current
         f.timeZone = TimeZone.current
         f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
+        return f
+    }()
+
+    /// Local-timezone day key, e.g. "2026-08-24". Everything resets when it changes.
+    static func today(_ date: Date = Date()) -> String {
+        formatter.string(from: date)
     }
 }
 

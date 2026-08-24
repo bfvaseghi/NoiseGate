@@ -26,11 +26,16 @@ struct SnapshotProvider: TimelineProvider {
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
-        // The monitor extension reloads timelines when a threshold is crossed;
-        // the 15-minute refresh mainly catches the midnight rollover.
+        // The monitor extension reloads timelines when a threshold is crossed.
+        // The scheduled refresh catches drift — and lands exactly at midnight
+        // when that comes first, so the daily reset shows promptly.
         let entry = SnapshotEntry(date: .now, snapshot: UsageSnapshot.loadToday())
-        let next = Calendar.current.date(byAdding: .minute, value: 15, to: .now) ?? .now
-        completion(Timeline(entries: [entry], policy: .after(next)))
+        let calendar = Calendar.current
+        let in15 = calendar.date(byAdding: .minute, value: 15, to: .now) ?? .now
+        let midnight = calendar.startOfDay(
+            for: calendar.date(byAdding: .day, value: 1, to: .now) ?? .now
+        )
+        completion(Timeline(entries: [entry], policy: .after(min(in15, midnight))))
     }
 }
 
@@ -38,9 +43,10 @@ struct NoiseGateWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "NoiseGateWidget", provider: SnapshotProvider()) { entry in
             NoiseGateWidgetView(entry: entry)
+                .containerBackground(NG.paper, for: .widget)
         }
         .configurationDisplayName("NoiseGate")
-        .description("Today's noise and messaging budgets at a glance.")
+        .description("Today's noise and Messages time against their budgets.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
     }
 }
@@ -56,24 +62,6 @@ struct NoiseGateWidgetView: View {
     }
 
     var body: some View {
-        if noiseOver, family == .systemSmall || family == .systemMedium {
-            content
-                .containerBackground(for: .widget) {
-                    ZStack {
-                        NG.alarmGradient
-                        HazardStripes(opacity: 0.08)
-                    }
-                }
-                // Dark scheme so text and gauges render light on the red slab.
-                .environment(\.colorScheme, .dark)
-        } else {
-            content
-                .containerBackground(NG.paper, for: .widget)
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
         switch family {
         case .accessoryCircular:
             Gauge(value: snap.noiseFraction) {
@@ -87,8 +75,7 @@ struct NoiseGateWidgetView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Image(systemName: "waveform.slash")
-                    Text(noiseOver ? "Over budget" : "NoiseGate")
-                        .font(.headline.weight(.semibold))
+                    Text("NoiseGate").font(.headline)
                 }
                 Text("Noise ≥\(snap.noiseMinutes)m / \(snap.noiseBudgetMinutes)m")
                     .font(.caption)
@@ -97,41 +84,44 @@ struct NoiseGateWidgetView: View {
             }
 
         case .systemMedium:
-            HStack(spacing: 20) {
-                gauges(size: 92)
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(noiseOver ? "OVER." : "NOISE.")
-                        .font(.ngDisplay(26))
+            HStack(spacing: 18) {
+                BudgetGauge(
+                    title: "Noise",
+                    minutes: snap.noiseMinutes,
+                    budgetMinutes: snap.noiseBudgetMinutes,
+                    tint: NG.noise,
+                    isFloor: snap.isFloor,
+                    size: 92
+                )
+                BudgetGauge(
+                    title: "Msgs",
+                    minutes: snap.messagesMinutes,
+                    budgetMinutes: snap.messagesBudgetMinutes,
+                    tint: NG.msg,
+                    isFloor: snap.isFloor,
+                    size: 92
+                )
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("NOISEGATE")
+                        .font(.ngLabel(10))
+                        .tracking(2)
+                        .foregroundStyle(noiseOver ? NG.alarm : NG.inkSoft)
                     Text(statusLine)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(NG.inkSoft)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 2)
 
-        default: // systemSmall
-            gauges(size: 64)
-        }
-    }
-
-    private func gauges(size: CGFloat) -> some View {
-        HStack(spacing: 12) {
+        default: // systemSmall — one ring reads better than two crammed ones
             BudgetGauge(
                 title: "Noise",
                 minutes: snap.noiseMinutes,
                 budgetMinutes: snap.noiseBudgetMinutes,
                 tint: NG.noise,
                 isFloor: snap.isFloor,
-                size: size
-            )
-            BudgetGauge(
-                title: "Msgs",
-                minutes: snap.messagesMinutes,
-                budgetMinutes: snap.messagesBudgetMinutes,
-                tint: NG.msg,
-                isFloor: snap.isFloor,
-                size: size
+                size: 96
             )
         }
     }
@@ -140,10 +130,9 @@ struct NoiseGateWidgetView: View {
         if noiseOver {
             let over = snap.noiseMinutes - snap.noiseBudgetMinutes
             return over > 0
-                ? "≥\(over.asHoursMinutes) past your line. Tomorrow resets."
-                : "You've hit today's line. Tomorrow resets."
+                ? "Noise ≥\(over.asHoursMinutes) over budget."
+                : "Noise budget reached."
         }
-        let left = snap.noiseBudgetMinutes - snap.noiseMinutes
-        return "≤\(left.asHoursMinutes) of noise left today."
+        return "≤\((snap.noiseBudgetMinutes - snap.noiseMinutes).asHoursMinutes) of noise remaining."
     }
 }

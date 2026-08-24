@@ -4,9 +4,9 @@ import WidgetKit
 import Foundation
 
 /// Runs in the background, woken by the system when the daily interval starts
-/// or a usage threshold is crossed. NoiseGate never blocks anything — this is
-/// purely awareness: update the widget, and check in with a friendly note at
-/// the budget milestones.
+/// or a usage threshold is crossed. NoiseGate never blocks anything — this
+/// extension only updates the widget snapshot and posts a factual
+/// notification at each budget milestone (once per day each).
 class NoiseGateMonitor: DeviceActivityMonitor {
 
     override func intervalDidStart(for activity: DeviceActivityName) {
@@ -19,6 +19,7 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         snap.messagesBudgetMinutes = config.messagesBudgetMinutes
         snap.isFloor = true
         snap.save()
+        AppGroup.defaults.set([String](), forKey: StoreKey.iosNudgesSent)
         WidgetCenter.shared.reloadAllTimelines()
     }
 
@@ -31,79 +32,36 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         guard parts.count == 2, let percent = Int(parts[1]) else { return }
         let kind = parts[0]
         let config = BudgetConfig.load()
+        let budget = kind == "noise" ? config.noiseBudgetMinutes : config.messagesBudgetMinutes
 
         // Update the widget's floor estimate: crossing "noise.p80" means at
         // least 80% of the noise budget has been spent.
         var snap = UsageSnapshot.loadToday()
         if kind == "noise" {
-            snap.noiseMinutes = max(snap.noiseMinutes, config.noiseBudgetMinutes * percent / 100)
+            snap.noiseMinutes = max(snap.noiseMinutes, budget * percent / 100)
         } else if kind == "msg" {
-            snap.messagesMinutes = max(snap.messagesMinutes, config.messagesBudgetMinutes * percent / 100)
+            snap.messagesMinutes = max(snap.messagesMinutes, budget * percent / 100)
         }
         snap.save()
         WidgetCenter.shared.reloadAllTimelines()
 
-        // Gentle check-ins past 100%.
-        if percent > 100 {
-            if kind == "noise" {
-                notify(id: "noise.\(percent)",
-                       title: percent >= 200 ? "Noise check-in" : "Still scrolling?",
-                       body: percent >= 200
-                        ? "You're at double your usual noise line today. No judgment — just flagging it."
-                        : "You're about 50% past your noise line for today. Maybe a good stopping point?")
-            } else {
-                notify(id: "msg.\(percent)",
-                       title: "Messages check-in",
-                       body: percent >= 200
-                        ? "Messaging is at double your usual line today."
-                        : "You're well past your usual messaging time today. Might be a call by now?")
-            }
-            return
-        }
+        guard let text = NudgeText.notification(kind: kind, percent: percent,
+                                                budgetMinutes: budget) else { return }
 
-        // Nudges at 50 / 80 / 100.
-        guard BudgetConfig.nudgePercents.contains(percent) else { return }
-        if kind == "noise" {
-            switch percent {
-            case 50:
-                notify(id: "noise.50", title: "Halfway there",
-                       body: "You've used half of today's noise budget (\(config.noiseBudgetMinutes.asHoursMinutes)). Just so you know.")
-            case 80:
-                notify(id: "noise.80", title: "80% of your noise budget used",
-                       body: "About \(max(1, config.noiseBudgetMinutes / 5).asHoursMinutes) left today, if you're keeping score.")
-            case 100:
-                notify(id: "noise.100", title: "That's today's noise budget",
-                       body: "You've hit \(config.noiseBudgetMinutes.asHoursMinutes). Nothing gets blocked — this is just your line in the sand.")
-            default:
-                break
-            }
-        } else if kind == "msg" {
-            switch percent {
-            case 50:
-                notify(id: "msg.50", title: "Messages: halfway",
-                       body: "Half of today's messaging budget used.")
-            case 80:
-                notify(id: "msg.80", title: "Messages at 80%",
-                       body: "You've been in messages a while today.")
-            case 100:
-                notify(id: "msg.100", title: "That's your Messages budget",
-                       body: "Over \(config.messagesBudgetMinutes.asHoursMinutes) of messaging today. Maybe wrap up the thread?")
-            default:
-                break
-            }
-        }
-    }
+        // Once per day per milestone, even if a mid-day monitoring restart
+        // (settings or toggle change) makes a threshold fire again.
+        let key = "\(kind).\(percent)@\(DayKey.today())"
+        var sent = AppGroup.defaults.stringArray(forKey: StoreKey.iosNudgesSent) ?? []
+        guard !sent.contains(key) else { return }
+        sent.append(key)
+        AppGroup.defaults.set(sent, forKey: StoreKey.iosNudgesSent)
 
-    private func notify(id: String, title: String, body: String) {
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
+        content.title = text.title
+        content.body = text.body
         content.sound = .default
-        let request = UNNotificationRequest(
-            identifier: "noisegate.\(id).\(DayKey.today())",
-            content: content,
-            trigger: nil
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: "noisegate.\(key)", content: content, trigger: nil)
         )
-        UNUserNotificationCenter.current().add(request)
     }
 }
