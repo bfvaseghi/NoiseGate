@@ -29,6 +29,9 @@ struct NoiseGateReportExtension: DeviceActivityReportExtension {
         MessagesRhythmReport { summary in
             RhythmView(summary: summary, kind: .messages)
         }
+        CombinedReport { summary in
+            CombinedView(summary: summary)
+        }
     }
 }
 
@@ -70,6 +73,7 @@ extension DeviceActivityReport.Context {
     static let messagesWeek = Self("Messages Week")
     static let distractionsRhythm = Self("Distractions Rhythm")
     static let messagesRhythm = Self("Messages Rhythm")
+    static let combined = Self("Combined")
 }
 
 enum ReportKind { case distractions, messages }
@@ -316,6 +320,84 @@ private struct AppRow: View {
         // system from an opaque token, so we cannot supply a label ourselves
         // and ignoring the children would silence it.
         .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Combined (both totals as one number)
+
+struct CombinedReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .combined
+    let content: (ActivitySummary) -> CombinedView
+
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> ActivitySummary {
+        await summarize(data)
+    }
+}
+
+/// Everything tracked, added up. The host passes the union of both token
+/// sets, so this is the one place the two totals appear as a single figure —
+/// the cards beneath it keep showing them apart.
+struct CombinedView: View {
+    let summary: ActivitySummary
+
+    private var combinedBudget: Int {
+        let config = BudgetConfig.load()
+        return config.distractionBudgetMinutes + config.messagesBudgetMinutes
+    }
+
+    private var reached: Bool {
+        combinedBudget > 0 && summary.minutes >= combinedBudget
+    }
+
+    private var fraction: Double {
+        combinedBudget > 0 ? min(1, Double(summary.minutes) / Double(combinedBudget)) : 0
+    }
+
+    private var tint: Color { reached ? NG.alarm : NG.ink }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(summary.minutes.asHoursMinutes)
+                    .font(.ngNumber(40))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .contentTransition(.numericText())
+                Text("OF \(combinedBudget.asHoursMinutes)")
+                    .font(.ngLabel(10))
+                    .tracking(1.4)
+                    .foregroundStyle(NG.inkSoft)
+                Spacer(minLength: 4)
+                if summary.totalPickups > 0 {
+                    Text("\(summary.totalPickups) PICKUPS")
+                        .font(.ngLabel(10))
+                        .tracking(1.4)
+                        .foregroundStyle(NG.inkSoft)
+                }
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(NG.line)
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: fraction == 0 ? 0 : max(8, geo.size.width * fraction))
+                }
+            }
+            .frame(height: 10)
+            .accessibilityHidden(true)
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("All tracked time today")
+        .accessibilityValue(
+            "\(summary.minutes) minutes of a \(combinedBudget) minute combined budget"
+                + (summary.totalPickups > 0 ? ", \(summary.totalPickups) pickups" : "")
+        )
     }
 }
 

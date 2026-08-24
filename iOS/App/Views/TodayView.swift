@@ -11,6 +11,7 @@ extension DeviceActivityReport.Context {
     static let messagesWeek = Self("Messages Week")
     static let distractionsRhythm = Self("Distractions Rhythm")
     static let messagesRhythm = Self("Messages Rhythm")
+    static let combined = Self("Combined")
 }
 
 enum StatsRange: String, CaseIterable, Identifiable {
@@ -134,6 +135,27 @@ struct TodayView: View {
                     )
                 }
 
+                if range == .today, distractionsActive || messagesActive {
+                    CombinedCard(
+                        budgetMinutes: model.config.distractionBudgetMinutes
+                            + model.config.messagesBudgetMinutes
+                    ) {
+                        DeviceActivityReport(
+                            .combined,
+                            filter: filter(
+                                // The union of both selections: one number for
+                                // everything being tracked. The cards below
+                                // still show each total on its own.
+                                apps: model.activeDistractionApps
+                                    .union(model.activeMessagesApps),
+                                webDomains: model.activeDistractionWebDomains
+                            )
+                        )
+                        .frame(height: 74)
+                        .id("combined")
+                    }
+                }
+
                 UsageCard(
                     chip: "Distractions", tint: NG.distraction,
                     budgetLabel: budgetLabel(model.config.distractionBudgetMinutes)
@@ -248,6 +270,31 @@ struct RangePicker: View {
         .background(NG.card, in: Capsule())
         .overlay(Capsule().strokeBorder(NG.line, lineWidth: 1))
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Everything tracked, as one figure. Deliberately quieter than the two
+/// ledger cards beneath it: it is the summary, not the detail.
+struct CombinedCard<Content: View>: View {
+    let budgetMinutes: Int
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("ALL TRACKED TIME")
+                    .font(.ngLabel(10))
+                    .tracking(2)
+                    .foregroundStyle(NG.inkSoft)
+                Spacer()
+                Text("BUDGET \(budgetMinutes.asHoursMinutes)")
+                    .font(.ngLabel(10))
+                    .tracking(1.5)
+                    .foregroundStyle(NG.inkSoft)
+            }
+            content
+        }
+        .ngCard(padding: 18)
     }
 }
 

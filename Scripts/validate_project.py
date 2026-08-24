@@ -223,6 +223,7 @@ contexts = {
     'Self("Distractions")',
     'Self("Messages")',
     'Self("Distractions Week")',
+    'Self("Combined")',
     'Self("Messages Week")',
 }
 for path in ("iOS/App/Views/TodayView.swift", "iOS/ReportExtension/NoiseGateReport.swift"):
