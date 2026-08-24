@@ -1,46 +1,58 @@
 import DeviceActivity
+import Foundation
 import UserNotifications
 import WidgetKit
-import Foundation
 
-/// Runs in the background, woken by the system when the daily interval starts
-/// or a usage threshold is crossed. NoiseGate never blocks anything — this
-/// extension only updates the widget snapshot and posts a factual
-/// notification at each budget milestone (once per day each).
-class NoiseGateMonitor: DeviceActivityMonitor {
+/// Background threshold handling. This extension never blocks. It only
+/// advances truthful widget floors and posts enabled, once-per-day nudges.
+final class NoiseGateMonitor: DeviceActivityMonitor {
+    private let store = SharedStore.shared
 
     override func intervalDidStart(for activity: DeviceActivityName) {
         super.intervalDidStart(for: activity)
-        guard activity.rawValue == "daily" else { return }
+        guard activity.rawValue == DeviceActivityName.daily.rawValue else { return }
+        guard store.bool(forKey: StoreKey.monitoringAcceptsCallbacks) else { return }
 
-        // This also fires when monitoring restarts mid-day (every settings or
-        // toggle change): the stored snapshot is still today's, and its floor
-        // and the nudge ledger must survive — only a true day change resets.
-        // Read the raw stored snapshot; loadToday() would already have reset it.
-        let previous = AppGroup.defaults.codable(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
-        if let previous, previous.dayKey == DayKey.today() { return }
+        // Read the raw stored value before replacing it with today's snapshot.
+        let today = DayKey.today()
+        let previous = store.load(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
 
-        // File the finished day into history before resetting.
+        // DeviceActivity also calls this during a mid-day restart. Preserve
+        // the existing floors and nudge ledger. Repair only the active flag in
+        // case the host app exited after startMonitoring succeeded.
+        if let previous, previous.dayKey == today {
+            guard !previous.monitoringIsActive else { return }
+            _ = store.update(
+                UsageSnapshot.self,
+                forKey: StoreKey.usageSnapshot,
+                default: previous
+            ) { snapshot in
+                guard snapshot.dayKey == today else { return }
+                snapshot.monitoringIsActive = true
+                snapshot.updatedAt = .now
+            }
+            WidgetCenter.shared.reloadTimelines(ofKind: "NoiseGateWidget")
+            return
+        }
         if let previous {
-            HistoryStore.record(DayRecord(
-                dayKey: previous.dayKey,
-                noiseMinutes: previous.noiseMinutes,
-                messagesMinutes: previous.messagesMinutes,
-                noiseBudgetMinutes: previous.noiseBudgetMinutes,
-                messagesBudgetMinutes: previous.messagesBudgetMinutes,
-                isFloor: true
-            ))
+            HistoryStore.recordFinishedSnapshot(previous)
         }
 
-        // A new day: reset the widget snapshot and the nudge ledger.
         let config = BudgetConfig.load()
-        var snap = UsageSnapshot()
-        snap.noiseBudgetMinutes = config.noiseBudgetMinutes
-        snap.messagesBudgetMinutes = config.messagesBudgetMinutes
-        snap.isFloor = true
-        snap.save()
-        AppGroup.defaults.set([String](), forKey: StoreKey.iosNudgesSent)
-        WidgetCenter.shared.reloadAllTimelines()
+        var snapshot = UsageSnapshot(
+            dayKey: today,
+            distractionsConfigured: previous?.distractionsConfigured ?? false,
+            messagesConfigured: previous?.messagesConfigured ?? false,
+            isFloor: true
+        )
+        snapshot.distractionBudgetMinutes = config.distractionBudgetMinutes
+        snapshot.messagesBudgetMinutes = config.messagesBudgetMinutes
+        snapshot.isFloor = true
+        snapshot.monitoringIsActive = true
+        snapshot.updatedAt = .now
+        snapshot.save()
+        store.saveStringArray([], forKey: StoreKey.iosNudgesSent)
+        WidgetCenter.shared.reloadTimelines(ofKind: "NoiseGateWidget")
     }
 
     override func eventDidReachThreshold(
@@ -48,41 +60,84 @@ class NoiseGateMonitor: DeviceActivityMonitor {
         activity: DeviceActivityName
     ) {
         super.eventDidReachThreshold(event, activity: activity)
-        let parts = event.rawValue.components(separatedBy: ".p")
-        guard parts.count == 2, let percent = Int(parts[1]) else { return }
-        let kind = parts[0]
-        let config = BudgetConfig.load()
-        let budget = kind == "noise" ? config.noiseBudgetMinutes : config.messagesBudgetMinutes
+        guard activity.rawValue == DeviceActivityName.daily.rawValue else { return }
+        guard store.bool(forKey: StoreKey.monitoringAcceptsCallbacks),
+              let parsed = ThresholdEvent.parse(event) else { return }
+        guard parsed.generation == store.load(
+            Int.self,
+            forKey: StoreKey.monitoringGeneration
+        ) else { return }
+        let kind = parsed.kind
+        let percent = parsed.percent
+        let budget = parsed.budgetMinutes
+        let thresholdMinutes = parsed.thresholdMinutes
 
-        // Update the widget's floor estimate: crossing "noise.p80" means at
-        // least 80% of the noise budget has been spent.
-        var snap = UsageSnapshot.loadToday()
-        if kind == "noise" {
-            snap.noiseMinutes = max(snap.noiseMinutes, budget * percent / 100)
-        } else if kind == "msg" {
-            snap.messagesMinutes = max(snap.messagesMinutes, budget * percent / 100)
+        // Notification preferences may change without rebuilding monitoring.
+        // The scheduled budget and threshold must come from the event itself.
+        let config = BudgetConfig.load()
+        let today = DayKey.today()
+
+        // Defensive ordering: Apple normally starts the interval before
+        // delivering its events, but filing here too prevents a stale snapshot
+        // from being overwritten if callbacks arrive in another order.
+        if let previous = store.load(UsageSnapshot.self, forKey: StoreKey.usageSnapshot) {
+            HistoryStore.recordFinishedSnapshot(previous, today: today)
         }
-        snap.save()
-        WidgetCenter.shared.reloadAllTimelines()
+
+        _ = store.update(
+            UsageSnapshot.self,
+            forKey: StoreKey.usageSnapshot,
+            default: UsageSnapshot()
+        ) { snapshot in
+            ThresholdSnapshotReducer.apply(
+                to: &snapshot,
+                today: today,
+                kind: kind,
+                budgetMinutes: budget,
+                thresholdMinutes: thresholdMinutes,
+                fallbackConfig: config
+            )
+        }
+        WidgetCenter.shared.reloadTimelines(ofKind: "NoiseGateWidget")
+
+        // A reconfiguration can make several includesPastActivity events fire
+        // together. Rebuild the widget floor, but do not turn that catch-up
+        // into a burst of stale notifications.
+        if let configuredAt = store.load(Date.self, forKey: StoreKey.monitoringConfiguredAt) {
+            let elapsed = Date().timeIntervalSince(configuredAt)
+            if elapsed >= 0 && elapsed < 120 { return }
+        }
 
         guard config.notifies(atPercent: percent),
-              let text = NudgeText.notification(kind: kind, percent: percent,
-                                                budgetMinutes: budget) else { return }
+              let text = NudgeText.notification(
+                kind: kind,
+                percent: percent,
+                budgetMinutes: budget
+              ) else { return }
 
-        // Once per day per milestone, even if a mid-day monitoring restart
-        // (settings or toggle change) makes a threshold fire again.
-        let key = "\(kind).\(percent)@\(DayKey.today())"
-        var sent = AppGroup.defaults.stringArray(forKey: StoreKey.iosNudgesSent) ?? []
-        guard !sent.contains(key) else { return }
-        sent.append(key)
-        AppGroup.defaults.set(sent, forKey: StoreKey.iosNudgesSent)
+        let key = "\(kind).\(percent)@\(today)"
+        let legacyKey = kind == "distractions"
+            ? "noise.\(percent)@\(today)" : nil
+        var inserted = false
+        _ = store.updateStringSet(forKey: StoreKey.iosNudgesSent) { sent in
+            let legacyWasSent = legacyKey.map { sent.contains($0) } ?? false
+            let wasSent = sent.contains(key) || legacyWasSent
+            sent.insert(key)
+            inserted = !wasSent
+        }
+        guard inserted else { return }
 
         let content = UNMutableNotificationContent()
         content.title = text.title
         content.body = text.body
         content.sound = .default
+        content.threadIdentifier = "noisegate.\(kind)"
         UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "noisegate.\(key)", content: content, trigger: nil)
+            UNNotificationRequest(
+                identifier: "noisegate.\(key)",
+                content: content,
+                trigger: nil
+            )
         )
     }
 }

@@ -10,20 +10,25 @@ enum NudgeText {
     static func notification(
         kind: String, percent: Int, budgetMinutes: Int
     ) -> (title: String, body: String)? {
-        let category = kind == "noise" ? "Noise" : "Messages"
+        let category = kind == "distractions" || kind == "noise"
+            ? "Distractions" : "Messages"
+        let usedMinutes = max(
+            1,
+            Int((Double(budgetMinutes) * Double(percent) / 100).rounded(.up))
+        )
         switch percent {
         case 50:
-            return ("\(category): 50% of budget used",
-                    "\((budgetMinutes / 2).asHoursMinutes) of today's \(budgetMinutes.asHoursMinutes) budget used.")
+            return ("\(category): 50% checkpoint",
+                    "At least \(usedMinutes.asHoursMinutes) used against today's \(budgetMinutes.asHoursMinutes) budget.")
         case 80:
-            return ("\(category): 80% of budget used",
-                    "About \(max(1, budgetMinutes / 5).asHoursMinutes) remaining today.")
+            return ("\(category): 80% checkpoint",
+                    "At least \(usedMinutes.asHoursMinutes) used against today's \(budgetMinutes.asHoursMinutes) budget.")
         case 100:
             return ("\(category): budget reached",
-                    "\(budgetMinutes.asHoursMinutes) used today. Nothing is blocked.")
+                    "At least \(budgetMinutes.asHoursMinutes) used today. Nothing is blocked.")
         case 150, 200:
             return ("\(category): \(percent)% of budget",
-                    "Usage today is \(percent)% of the \(budgetMinutes.asHoursMinutes) budget.")
+                    "At least \(usedMinutes.asHoursMinutes) used today against a \(budgetMinutes.asHoursMinutes) budget.")
         default:
             return nil
         }

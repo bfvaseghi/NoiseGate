@@ -12,7 +12,7 @@ private typealias NativeColor = NSColor
 //
 // One visual world across iPhone, iPad, Mac, widgets, and extensions:
 // warm paper ground, condensed-black display type, category colors for
-// noise and messages, red reserved for the over-budget state. Never use
+// Distractions and Messages, with red reserved for the over-budget state. Never use
 // raw color literals in views — pull from these tokens so light/dark
 // stay coherent everywhere.
 
@@ -28,7 +28,7 @@ enum NG {
     static let alarm     = Color(light: 0xE0231E, dark: 0xF23B33)
     static let alarmDeep = Color(light: 0x8E0E0C, dark: 0x7A0B09)
     // Categories
-    static let noise = Color(light: 0xE07C0E, dark: 0xF59A2E)
+    static let distraction = Color(light: 0xE07C0E, dark: 0xF59A2E)
     static let msg   = Color(light: 0x18988F, dark: 0x2BB3A9)
     static let focus = Color(light: 0x5B5BD6, dark: 0x8181E8)
 

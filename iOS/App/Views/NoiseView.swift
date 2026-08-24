@@ -1,45 +1,57 @@
-import SwiftUI
 import FamilyControls
 import ManagedSettings
+import SwiftUI
 
-/// Where the tracked lists are managed. Add apps with Apple's picker, then
-/// toggle each one on (tracked) or off (paused) without losing the list.
-/// Apps never listed here are invisible to NoiseGate.
+/// The two explicit ledgers. Anything not listed here is the "noise" that
+/// NoiseGate removes from the user's Screen Time picture.
 struct NoiseView: View {
     @EnvironmentObject private var model: ScreenTimeModel
-    @State private var showNoisePicker = false
+    @State private var showDistractionPicker = false
     @State private var showMessagesPicker = false
+    @State private var distractionBeforePicker: FamilyActivitySelection?
+    @State private var messagesBeforePicker: FamilyActivitySelection?
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 PosterHeader(
-                    eyebrow: "Tracked apps",
-                    title: "NOISE.",
-                    detail: "Only listed apps are tracked. Toggle off to pause tracking."
+                    eyebrow: "Signal only",
+                    title: "APPS.",
+                    detail: "Choose only what wastes attention. Everything else stays invisible."
                 )
                 .padding(.top, 8)
 
                 TrackListCard(
-                    chip: "Noise", tint: NG.noise,
-                    selection: model.noiseSelection,
-                    muted: model.mutedNoise,
-                    emptyHint: "No apps selected. Add the apps to track against the noise budget.",
-                    footnote: "Apps not listed here are never tracked.",
-                    addApps: { showNoisePicker = true },
-                    setApp: model.setNoiseApp,
-                    setCategory: model.setNoiseCategory
+                    chip: "Distractions",
+                    tint: NG.distraction,
+                    selection: model.distractionSelection,
+                    paused: model.pausedDistractions,
+                    excludedApps: model.messagesSelection.applicationTokens,
+                    emptyHint: "No distractions selected. Add only the feeds, swiping, and other apps you want this total to mean.",
+                    footnote: "Messages selected below are automatically excluded. Whole categories are rejected so useful activity cannot leak into this total.",
+                    actionTitle: "Add apps",
+                    addApps: {
+                        distractionBeforePicker = model.distractionSelection
+                        showDistractionPicker = true
+                    },
+                    setApp: model.setDistractionApp,
+                    setWebDomain: model.setDistractionWebDomain
                 )
 
                 TrackListCard(
-                    chip: "Messages", tint: NG.msg,
+                    chip: "Messages",
+                    tint: NG.msg,
                     selection: model.messagesSelection,
-                    muted: model.mutedMessages,
-                    emptyHint: "Add the Messages app to track messaging time.",
-                    footnote: "Tracked separately with its own budget. FaceTime and WhatsApp are only tracked if you add them.",
-                    addApps: { showMessagesPicker = true },
+                    paused: model.pausedMessages,
+                    emptyHint: "Add the Messages app to keep conversation time on its own line.",
+                    footnote: "Messages is app-only. FaceTime and WhatsApp stay invisible unless you deliberately choose them here.",
+                    actionTitle: "Add Messages",
+                    addApps: {
+                        messagesBeforePicker = model.messagesSelection
+                        showMessagesPicker = true
+                    },
                     setApp: model.setMessagesApp,
-                    setCategory: model.setMessagesCategory
+                    setWebDomain: { _, _ in }
                 )
 
                 Spacer(minLength: 96)
@@ -50,32 +62,47 @@ struct NoiseView: View {
         }
         .scrollIndicators(.hidden)
         .background(NG.paper.ignoresSafeArea())
-        .familyActivityPicker(isPresented: $showNoisePicker, selection: $model.noiseSelection)
-        .familyActivityPicker(isPresented: $showMessagesPicker, selection: $model.messagesSelection)
-        .onChange(of: showNoisePicker) { _, presented in
-            if !presented { model.applyChanges() }
+        .familyActivityPicker(
+            isPresented: $showDistractionPicker,
+            selection: $model.distractionSelection
+        )
+        .familyActivityPicker(
+            isPresented: $showMessagesPicker,
+            selection: $model.messagesSelection
+        )
+        .onChange(of: showDistractionPicker) { _, presented in
+            guard !presented, let before = distractionBeforePicker else { return }
+            distractionBeforePicker = nil
+            if !SelectionStore.hasSameTokens(before, model.distractionSelection) {
+                model.applyTrackingChanges()
+            }
         }
         .onChange(of: showMessagesPicker) { _, presented in
-            if !presented { model.applyChanges() }
+            guard !presented, let before = messagesBeforePicker else { return }
+            messagesBeforePicker = nil
+            if !SelectionStore.hasSameTokens(before, model.messagesSelection) {
+                model.applyTrackingChanges()
+            }
         }
     }
 }
 
-/// A category card with an "Add apps" button and a toggle row per selected
-/// app/category. `Label(token)` renders the real app name and icon via the
-/// system, so the list is readable even though the tokens stay opaque to us.
 struct TrackListCard: View {
     let chip: String
     let tint: Color
     let selection: FamilyActivitySelection
-    let muted: MutedTokens
+    let paused: PausedTokens
+    var excludedApps: Set<ApplicationToken> = []
     let emptyHint: String
     let footnote: String
+    let actionTitle: String
     let addApps: () -> Void
     let setApp: (ApplicationToken, Bool) -> Void
-    let setCategory: (ActivityCategoryToken, Bool) -> Void
+    let setWebDomain: (WebDomainToken, Bool) -> Void
 
-    private var pausedCount: Int { muted.applications.count + muted.categories.count }
+    private var pausedCount: Int {
+        paused.applications.count + paused.webDomains.count
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -89,7 +116,7 @@ struct TrackListCard: View {
                 }
                 Spacer()
                 Button(action: addApps) {
-                    Label("Add apps", systemImage: "plus")
+                    Label(actionTitle, systemImage: "plus")
                         .font(.system(size: 13.5, weight: .bold))
                         .foregroundStyle(tint)
                         .padding(.horizontal, 14)
@@ -106,17 +133,24 @@ struct TrackListCard: View {
                     .padding(.vertical, 6)
             } else {
                 VStack(spacing: 2) {
-                    ForEach(Array(selection.categoryTokens), id: \.self) { token in
-                        toggleRow(isOn: !muted.categories.contains(token)) {
-                            setCategory(token, $0)
-                        } label: {
+                    ForEach(Array(selection.applicationTokens), id: \.self) { token in
+                        let isExcluded = excludedApps.contains(token)
+                        toggleRow(
+                            isOn: !paused.applications.contains(token) && !isExcluded,
+                            enabled: !isExcluded,
+                            note: isExcluded ? "Reserved for Messages" : nil,
+                            set: { setApp(token, $0) }
+                        ) {
                             Label(token)
                         }
                     }
-                    ForEach(Array(selection.applicationTokens), id: \.self) { token in
-                        toggleRow(isOn: !muted.applications.contains(token)) {
-                            setApp(token, $0)
-                        } label: {
+                    ForEach(Array(selection.webDomainTokens), id: \.self) { token in
+                        toggleRow(
+                            isOn: !paused.webDomains.contains(token),
+                            enabled: true,
+                            note: nil,
+                            set: { setWebDomain(token, $0) }
+                        ) {
                             Label(token)
                         }
                     }
@@ -133,17 +167,29 @@ struct TrackListCard: View {
 
     private func toggleRow<L: View>(
         isOn: Bool,
+        enabled: Bool,
+        note: String?,
         set: @escaping (Bool) -> Void,
         @ViewBuilder label: () -> L
     ) -> some View {
-        Toggle(isOn: Binding(get: { isOn }, set: set)) {
-            label()
-                .labelStyle(.titleAndIcon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(isOn ? NG.ink : NG.inkSoft)
-                .opacity(isOn ? 1 : 0.55)
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: Binding(get: { isOn }, set: set)) {
+                label()
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isOn ? NG.ink : NG.inkSoft)
+                    .opacity(isOn ? 1 : 0.55)
+            }
+            .tint(tint)
+            .disabled(!enabled)
+
+            if let note {
+                Text(note)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(NG.inkSoft)
+                    .padding(.leading, 36)
+            }
         }
-        .tint(tint)
         .padding(.vertical, 6)
     }
 }

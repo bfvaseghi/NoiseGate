@@ -2,11 +2,12 @@ import SwiftUI
 import DeviceActivity
 import FamilyControls
 import ManagedSettings
+import UIKit
 
 extension DeviceActivityReport.Context {
-    static let noise = Self("Noise")
+    static let distractions = Self("Distractions")
     static let messages = Self("Messages")
-    static let noiseWeek = Self("Noise Week")
+    static let distractionsWeek = Self("Distractions Week")
     static let messagesWeek = Self("Messages Week")
 }
 
@@ -18,11 +19,10 @@ enum StatsRange: String, CaseIterable, Identifiable {
 
 /// Usage overview: exact durations rendered by the report extension
 /// (privacy-preserving — the numbers never leave the report view), scoped to
-/// only the *active* noise and messages tokens, for today or the last 7 days.
+/// only the active Distractions and Messages tokens, for today or the last 7 days.
 struct TodayView: View {
     @EnvironmentObject private var model: ScreenTimeModel
     @State private var snapshot = UsageSnapshot.loadToday()
-    @State private var history: [DayRecord] = HistoryStore.lastDays(6)
     @State private var range: StatsRange = .today
 
     private let refresh = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -32,41 +32,41 @@ struct TodayView: View {
             ?? DateInterval(start: .now, duration: 3600)
     }
 
-    /// Last 7 calendar days, ending at tonight's midnight. Using the day
-    /// boundary (not `.now`) keeps the filter stable across renders, so the
-    /// report extension isn't re-queried on every 30s snapshot refresh.
     private var weekInterval: DateInterval {
         let calendar = Calendar.current
         let start = calendar.startOfDay(
             for: calendar.date(byAdding: .day, value: -6, to: .now) ?? .now
         )
+        // A stable day-boundary interval prevents the report extension from
+        // re-querying just because SwiftUI evaluated this view a moment later.
         return DateInterval(start: start, end: todayInterval.end)
     }
 
     private func filter(
         apps: Set<ApplicationToken>,
-        categories: Set<ActivityCategoryToken>,
         webDomains: Set<WebDomainToken>
     ) -> DeviceActivityFilter {
         DeviceActivityFilter(
             segment: .daily(during: range == .today ? todayInterval : weekInterval),
             users: .all,
-            devices: .init([.iPhone, .iPad]),
+            devices: UIDevice.current.userInterfaceIdiom == .pad
+                ? .init([.iPad]) : .init([.iPhone]),
             applications: apps,
-            categories: categories,
+            categories: [],
             webDomains: webDomains
         )
     }
 
-    private var noiseOver: Bool {
-        snapshot.noiseMinutes >= snapshot.noiseBudgetMinutes && snapshot.noiseBudgetMinutes > 0
+    private var distractionOver: Bool {
+        snapshot.distractionMinutes >= snapshot.distractionBudgetMinutes
+            && snapshot.distractionBudgetMinutes > 0
     }
 
-    private var noiseActive: Bool {
-        !model.activeNoiseApps.isEmpty || !model.activeNoiseCategories.isEmpty
+    private var distractionsActive: Bool {
+        !model.activeDistractionApps.isEmpty || !model.activeDistractionWebDomains.isEmpty
     }
     private var messagesActive: Bool {
-        !model.activeMessagesApps.isEmpty || !model.activeMessagesCategories.isEmpty
+        !model.activeMessagesApps.isEmpty
     }
 
     private var reportHeight: CGFloat { range == .today ? 168 : 214 }
@@ -85,32 +85,32 @@ struct TodayView: View {
 
                 RangePicker(selection: $range)
 
-                if range == .today && noiseOver {
+                if range == .today && distractionOver {
                     OverBudgetBanner(
-                        overMinutes: snapshot.noiseMinutes - snapshot.noiseBudgetMinutes,
-                        budgetMinutes: snapshot.noiseBudgetMinutes
+                        overMinutes: snapshot.distractionMinutes
+                            - snapshot.distractionBudgetMinutes,
+                        budgetMinutes: snapshot.distractionBudgetMinutes
                     )
                 }
 
                 UsageCard(
-                    chip: "Noise", tint: NG.noise,
-                    budgetLabel: budgetLabel(model.config.noiseBudgetMinutes)
+                    chip: "Distractions", tint: NG.distraction,
+                    budgetLabel: budgetLabel(model.config.distractionBudgetMinutes)
                 ) {
-                    if !noiseActive {
-                        MissingSelectionRow(text: model.noiseSelection.isEmpty
-                            ? "Add noise apps in the Noise tab."
-                            : "All noise apps are currently paused.")
+                    if !distractionsActive {
+                        MissingSelectionRow(text: model.distractionSelection.isEmpty
+                            ? "Add distracting apps in the Apps tab."
+                            : "All distracting apps are paused or counted in Messages.")
                     } else {
                         DeviceActivityReport(
-                            range == .today ? .noise : .noiseWeek,
+                            range == .today ? .distractions : .distractionsWeek,
                             filter: filter(
-                                apps: model.activeNoiseApps,
-                                categories: model.activeNoiseCategories,
-                                webDomains: model.noiseSelection.webDomainTokens
+                                apps: model.activeDistractionApps,
+                                webDomains: model.activeDistractionWebDomains
                             )
                         )
                         .frame(height: reportHeight)
-                        .id("noise-\(range.rawValue)")
+                        .id("distractions-\(range.rawValue)")
                     }
                 }
 
@@ -120,15 +120,14 @@ struct TodayView: View {
                 ) {
                     if !messagesActive {
                         MissingSelectionRow(text: model.messagesSelection.isEmpty
-                            ? "Add the Messages app in the Noise tab."
+                            ? "Add the Messages app in the Apps tab."
                             : "Messages tracking is currently paused.")
                     } else {
                         DeviceActivityReport(
                             range == .today ? .messages : .messagesWeek,
                             filter: filter(
                                 apps: model.activeMessagesApps,
-                                categories: model.activeMessagesCategories,
-                                webDomains: model.messagesSelection.webDomainTokens
+                                webDomains: []
                             )
                         )
                         .frame(height: reportHeight)
@@ -136,9 +135,7 @@ struct TodayView: View {
                     }
                 }
 
-                HistoryStatsCard(finishedDays: history, todaySnapshot: snapshot)
-
-                Text("Only listed apps are counted. Nothing is blocked.")
+                Text("Only Distractions and Messages are counted. Everything else is excluded as noise. Nothing is blocked.")
                     .font(.ngLabel(11.5))
                     .foregroundStyle(NG.inkSoft)
                     .multilineTextAlignment(.center)
@@ -151,14 +148,8 @@ struct TodayView: View {
         }
         .scrollIndicators(.hidden)
         .background(NG.paper.ignoresSafeArea())
-        .onAppear {
-            snapshot = UsageSnapshot.loadToday()
-            history = HistoryStore.lastDays(6)
-        }
-        .onReceive(refresh) { _ in
-            snapshot = UsageSnapshot.loadToday()
-            history = HistoryStore.lastDays(6)
-        }
+        .onAppear { snapshot = UsageSnapshot.loadToday() }
+        .onReceive(refresh) { _ in snapshot = UsageSnapshot.loadToday() }
     }
 
     private func budgetLabel(_ minutes: Int) -> String {
@@ -171,13 +162,15 @@ struct TodayView: View {
 /// Compact capsule switcher between Today and 7 Days, matching the tab bar.
 struct RangePicker: View {
     @Binding var selection: StatsRange
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var pill
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(StatsRange.allCases) { range in
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                    withAnimation(reduceMotion
+                        ? nil : .spring(response: 0.3, dampingFraction: 0.85)) {
                         selection = range
                     }
                 } label: {
@@ -229,7 +222,7 @@ struct UsageCard<Content: View>: View {
     }
 }
 
-/// Status card shown once the noise budget is reached. Factual only —
+/// Status card shown once the distraction budget is reached. Factual only —
 /// nothing is blocked.
 struct OverBudgetBanner: View {
     let overMinutes: Int
@@ -243,7 +236,7 @@ struct OverBudgetBanner: View {
                 .frame(width: 44, height: 44)
                 .background(NG.alarm, in: Circle())
             VStack(alignment: .leading, spacing: 2) {
-                Text("Noise budget reached")
+                Text("Distraction budget reached")
                     .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(NG.ink)
                 Text(overMinutes > 0
@@ -259,66 +252,6 @@ struct OverBudgetBanner: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(NG.alarm.opacity(0.35), lineWidth: 1.5)
         )
-    }
-}
-
-/// "Budget reached on N of the last M days" — from the rollover history plus
-/// today's snapshot. Values are threshold floors on iOS, marked accordingly.
-struct HistoryStatsCard: View {
-    let finishedDays: [DayRecord]
-    let todaySnapshot: UsageSnapshot
-
-    private var records: [DayRecord] {
-        var records = finishedDays
-        records.append(DayRecord(
-            dayKey: todaySnapshot.dayKey,
-            noiseMinutes: todaySnapshot.noiseMinutes,
-            messagesMinutes: todaySnapshot.messagesMinutes,
-            noiseBudgetMinutes: todaySnapshot.noiseBudgetMinutes,
-            messagesBudgetMinutes: todaySnapshot.messagesBudgetMinutes,
-            isFloor: true
-        ))
-        return records
-    }
-
-    var body: some View {
-        let records = self.records
-        // One day of data isn't a trend yet.
-        if records.count >= 2 {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("LAST \(records.count) DAYS")
-                    .font(.ngLabel(10))
-                    .tracking(2)
-                    .foregroundStyle(NG.inkSoft)
-                statRow(
-                    tint: NG.noise,
-                    label: "Noise budget reached",
-                    count: records.filter(\.noiseReachedBudget).count,
-                    total: records.count
-                )
-                statRow(
-                    tint: NG.msg,
-                    label: "Messages budget reached",
-                    count: records.filter(\.messagesReachedBudget).count,
-                    total: records.count
-                )
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .ngCard(padding: 16)
-        }
-    }
-
-    private func statRow(tint: Color, label: String, count: Int, total: Int) -> some View {
-        HStack {
-            Circle().fill(tint).frame(width: 6, height: 6)
-            Text(label)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(NG.ink)
-            Spacer()
-            Text("\(count) of \(total) days")
-                .font(.ngNumber(14))
-                .foregroundStyle(count > 0 ? NG.ink : NG.inkSoft)
-        }
     }
 }
 

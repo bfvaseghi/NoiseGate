@@ -3,14 +3,14 @@ import FamilyControls
 
 // MARK: - Root: custom tab shell over the three screens
 
-enum NGTab: String, CaseIterable, Identifiable {
-    case today, noise, budgets
+enum NGTab: String, CaseIterable, Identifiable, Equatable {
+    case today, tracking, budgets
     var id: String { rawValue }
 
     var label: String {
         switch self {
         case .today: return "Today"
-        case .noise: return "Noise"
+        case .tracking: return "Apps"
         case .budgets: return "Budgets"
         }
     }
@@ -18,8 +18,18 @@ enum NGTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .today: return "gauge.with.needle"
-        case .noise: return "waveform.slash"
+        case .tracking: return "checklist.checked"
         case .budgets: return "slider.horizontal.3"
+        }
+    }
+}
+
+extension NoiseGateRoute {
+    var tab: NGTab {
+        switch self {
+        case .today: return .today
+        case .apps: return .tracking
+        case .budgets: return .budgets
         }
     }
 }
@@ -35,7 +45,7 @@ struct ContentView: View {
                     Group {
                         switch tab {
                         case .today: TodayView()
-                        case .noise: NoiseView()
+                        case .tracking: NoiseView()
                         case .budgets: SettingsView()
                         }
                     }
@@ -51,7 +61,7 @@ struct ContentView: View {
                 OnboardingView()
             }
         }
-        .alert("Something went wrong", isPresented: .init(
+        .alert("NoiseGate needs attention", isPresented: .init(
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
         )) {
@@ -59,19 +69,25 @@ struct ContentView: View {
         } message: {
             Text(model.lastError ?? "")
         }
+        .onOpenURL { url in
+            guard let route = NoiseGateRoute(url: url) else { return }
+            tab = route.tab
+        }
     }
 }
 
 /// Floating capsule tab bar with a sliding alarm-red pill.
 struct NGTabBar: View {
     @Binding var selection: NGTab
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var pill
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(NGTab.allCases) { tab in
                 Button {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                    withAnimation(reduceMotion
+                        ? nil : .spring(response: 0.32, dampingFraction: 0.82)) {
                         selection = tab
                     }
                 } label: {
@@ -108,6 +124,7 @@ struct NGTabBar: View {
 
 struct OnboardingView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed = false
 
     var body: some View {
@@ -118,16 +135,20 @@ struct OnboardingView: View {
                 .font(.system(size: 40, weight: .black))
                 .foregroundStyle(NG.alarm)
                 .padding(.bottom, 28)
-                .symbolEffect(.pulse, options: .repeating, isActive: revealed)
+                .symbolEffect(
+                    .pulse,
+                    options: .repeating,
+                    isActive: revealed && !reduceMotion
+                )
 
             VStack(alignment: .leading, spacing: -6) {
-                PosterLine("CUT")
+                PosterLine("KEEP")
                 PosterLine("THE")
-                PosterLine("NOISE", accent: true)
+                PosterLine("SIGNAL", accent: true)
             }
             .padding(.bottom, 24)
 
-            Text("NoiseGate tracks only the apps you list as distracting, plus Messages on its own budget, and sends a notification at set thresholds. Everything else on this device is not tracked, and nothing is ever blocked.")
+            Text("Apple Screen Time mixes distractions with useful activity. NoiseGate removes that noise. It tracks only the distracting apps you choose, plus Messages on a separate line. Everything else stays invisible.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
                 .frame(maxWidth: 340, alignment: .leading)
@@ -147,7 +168,7 @@ struct OnboardingView: View {
             .buttonStyle(.plain)
             .padding(.bottom, 14)
 
-            Text("App selections stay opaque to NoiseGate — Apple's Screen Time framework keeps the list private, even from this app.")
+            Text("Apple keeps token identities opaque. NoiseGate can display Apple's private labels, but it cannot inspect or export the underlying app IDs.")
                 .font(.ngLabel(11))
                 .foregroundStyle(NG.inkSoft.opacity(0.8))
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -159,7 +180,7 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NG.paper.ignoresSafeArea())
         .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.85).delay(0.1)) {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.85).delay(0.1)) {
                 revealed = true
             }
         }

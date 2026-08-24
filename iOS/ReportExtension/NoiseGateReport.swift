@@ -1,22 +1,24 @@
 import Charts
 import DeviceActivity
+import FamilyControls
+import ManagedSettings
 import SwiftUI
 
 /// Renders exact usage for the filter the host app passes in. Screen Time data
 /// stays inside this sandboxed view — it can't be exported, which is why the
 /// widget uses threshold floors instead. Two scenes, one per category, so each
-/// can compare against its own budget and get loud about it.
+/// can compare against the budget that was active on that day.
 @main
 struct NoiseGateReportExtension: DeviceActivityReportExtension {
     var body: some DeviceActivityReportScene {
-        NoiseReport { summary in
-            LoudActivityView(summary: summary, kind: .noise)
+        DistractionsReport { summary in
+            ActivityView(summary: summary, kind: .distractions)
         }
         MessagesReport { summary in
-            LoudActivityView(summary: summary, kind: .messages)
+            ActivityView(summary: summary, kind: .messages)
         }
-        NoiseWeekReport { summary in
-            WeekActivityView(summary: summary, kind: .noise)
+        DistractionsWeekReport { summary in
+            WeekActivityView(summary: summary, kind: .distractions)
         }
         MessagesWeekReport { summary in
             WeekActivityView(summary: summary, kind: .messages)
@@ -26,31 +28,37 @@ struct NoiseGateReportExtension: DeviceActivityReportExtension {
 
 struct ActivitySummary {
     var totalDuration: TimeInterval = 0
-    var topApps: [(name: String, duration: TimeInterval)] = []
+    var topApps: [AppUsage] = []
+
+    struct AppUsage {
+        let token: ApplicationToken
+        let duration: TimeInterval
+    }
 }
 
 extension DeviceActivityReport.Context {
-    static let noise = Self("Noise")
+    static let distractions = Self("Distractions")
     static let messages = Self("Messages")
-    static let noiseWeek = Self("Noise Week")
+    static let distractionsWeek = Self("Distractions Week")
     static let messagesWeek = Self("Messages Week")
 }
 
-enum ReportKind { case noise, messages }
+enum ReportKind { case distractions, messages }
 
 private func summarize(
     _ data: DeviceActivityResults<DeviceActivityData>
 ) async -> ActivitySummary {
     var summary = ActivitySummary()
-    var perApp: [String: TimeInterval] = [:]
+    var perApp: [ApplicationToken: TimeInterval] = [:]
 
     for await deviceData in data {
         for await segment in deviceData.activitySegments {
             summary.totalDuration += segment.totalActivityDuration
             for await category in segment.categories {
                 for await app in category.applications {
-                    let name = app.application.localizedDisplayName ?? "Unknown app"
-                    perApp[name, default: 0] += app.totalActivityDuration
+                    if let token = app.application.token {
+                        perApp[token, default: 0] += app.totalActivityDuration
+                    }
                 }
             }
         }
@@ -59,13 +67,13 @@ private func summarize(
     summary.topApps = perApp
         .sorted { $0.value > $1.value }
         .prefix(3)
-        .map { (name: $0.key, duration: $0.value) }
+        .map { ActivitySummary.AppUsage(token: $0.key, duration: $0.value) }
     return summary
 }
 
-struct NoiseReport: DeviceActivityReportScene {
-    let context: DeviceActivityReport.Context = .noise
-    let content: (ActivitySummary) -> LoudActivityView
+struct DistractionsReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .distractions
+    let content: (ActivitySummary) -> ActivityView
 
     func makeConfiguration(
         representing data: DeviceActivityResults<DeviceActivityData>
@@ -76,7 +84,7 @@ struct NoiseReport: DeviceActivityReportScene {
 
 struct MessagesReport: DeviceActivityReportScene {
     let context: DeviceActivityReport.Context = .messages
-    let content: (ActivitySummary) -> LoudActivityView
+    let content: (ActivitySummary) -> ActivityView
 
     func makeConfiguration(
         representing data: DeviceActivityResults<DeviceActivityData>
@@ -85,38 +93,40 @@ struct MessagesReport: DeviceActivityReportScene {
     }
 }
 
-struct LoudActivityView: View {
+struct ActivityView: View {
     let summary: ActivitySummary
     let kind: ReportKind
 
     private var budgetMinutes: Int {
         let config = BudgetConfig.load()
-        return kind == .noise ? config.noiseBudgetMinutes : config.messagesBudgetMinutes
+        return kind == .distractions
+            ? config.distractionBudgetMinutes : config.messagesBudgetMinutes
     }
 
     private var minutes: Int { Int(summary.totalDuration / 60) }
-    private var overBudget: Bool { minutes >= budgetMinutes && budgetMinutes > 0 }
+    private var reachedBudget: Bool { minutes >= budgetMinutes && budgetMinutes > 0 }
+    private var overBudget: Bool { minutes > budgetMinutes && budgetMinutes > 0 }
     private var fraction: Double {
         budgetMinutes > 0 ? min(1, Double(minutes) / Double(budgetMinutes)) : 0
     }
 
-    private var tint: Color { kind == .noise ? NG.noise : NG.msg }
-    private var barColor: Color { overBudget ? NG.alarm : tint }
+    private var tint: Color { kind == .distractions ? NG.distraction : NG.msg }
+    private var barColor: Color { reachedBudget ? NG.alarm : tint }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(minutes.asHoursMinutes)
                     .font(.ngNumber(46))
-                    .foregroundStyle(overBudget ? NG.alarm : NG.ink)
+                    .foregroundStyle(reachedBudget ? NG.alarm : NG.ink)
                     .contentTransition(.numericText())
                 Text("/ \(budgetMinutes.asHoursMinutes)")
                     .font(.ngLabel(13))
                     .tracking(1)
                     .foregroundStyle(NG.inkSoft)
                 Spacer()
-                if overBudget {
-                    Text("OVER")
+                if reachedBudget {
+                    Text(overBudget ? "OVER" : "REACHED")
                         .font(.ngLabel(10))
                         .tracking(2)
                         .foregroundStyle(.white)
@@ -132,23 +142,27 @@ struct LoudActivityView: View {
                     Capsule().fill(barColor.opacity(0.14))
                     Capsule()
                         .fill(barColor)
-                        .frame(width: max(10, geo.size.width * fraction))
+                        .frame(width: fraction == 0 ? 0 : max(10, geo.size.width * fraction))
                 }
             }
             .frame(height: 12)
 
-            if summary.topApps.isEmpty {
-                Text(kind == .noise
-                        ? "No noise-app usage recorded today."
+            if summary.totalDuration == 0 {
+                Text(kind == .distractions
+                        ? "No distracting-app usage recorded today."
                         : "No messaging recorded today.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NG.inkSoft)
+            } else if summary.topApps.isEmpty {
+                Text("No app breakdown is available for this selection.")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(NG.inkSoft)
             } else {
                 VStack(spacing: 5) {
-                    ForEach(summary.topApps, id: \.name) { app in
+                    ForEach(summary.topApps, id: \.token) { app in
                         HStack {
-                            Circle().fill(tint).frame(width: 6, height: 6)
-                            Text(app.name)
+                            Label(app.token)
+                                .labelStyle(.titleAndIcon)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(NG.ink)
                             Spacer()
@@ -168,46 +182,78 @@ struct LoudActivityView: View {
 // MARK: - Week view (exact 7-day chart, rendered inside the privacy sandbox)
 
 struct WeekSummary {
-    /// One entry per day, oldest first; days with no usage are zero-filled
-    /// by the view's chart domain.
+    /// Exactly seven entries, oldest first, including zero-usage days.
     var days: [WeekDay] = []
     var totalMinutes = 0
+
+    var hasUsage: Bool { totalMinutes > 0 }
 
     struct WeekDay: Identifiable {
         let date: Date
         let minutes: Int
+        let budgetMinutes: Int?
         var id: Date { date }
+        var reachedBudget: Bool {
+            budgetMinutes.map { minutes >= $0 } ?? false
+        }
     }
 }
 
 private func summarizeWeek(
-    _ data: DeviceActivityResults<DeviceActivityData>
+    _ data: DeviceActivityResults<DeviceActivityData>,
+    kind: ReportKind
 ) async -> WeekSummary {
     // Segments arrive per device per day; merge across devices by day.
-    var byDay: [Date: Int] = [:]
+    var byDay: [Date: TimeInterval] = [:]
     let calendar = Calendar.current
     for await deviceData in data {
         for await segment in deviceData.activitySegments {
             let day = calendar.startOfDay(for: segment.dateInterval.start)
-            byDay[day, default: 0] += Int(segment.totalActivityDuration / 60)
+            byDay[day, default: 0] += segment.totalActivityDuration
         }
     }
+    let today = calendar.startOfDay(for: .now)
+    let todayKey = DayKey.today(today)
+    let currentConfig = BudgetConfig.load()
+    var history: [String: DayRecord] = [:]
+    for record in HistoryStore.load() {
+        history[record.dayKey] = record
+    }
+    let days = (0..<7).compactMap { offset in
+        calendar.date(byAdding: .day, value: offset - 6, to: today)
+    }
     var summary = WeekSummary()
-    summary.days = byDay
-        .sorted { $0.key < $1.key }
-        .map { WeekSummary.WeekDay(date: $0.key, minutes: $0.value) }
-    summary.totalMinutes = byDay.values.reduce(0, +)
+    summary.days = days.map { date in
+        let key = DayKey.today(date)
+        let stored = history[key]
+        let budget: Int?
+        if key == todayKey {
+            budget = kind == .distractions
+                ? currentConfig.distractionBudgetMinutes
+                : currentConfig.messagesBudgetMinutes
+        } else if kind == .distractions {
+            budget = stored?.distractionBudgetMinutes
+        } else {
+            budget = stored?.messagesBudgetMinutes
+        }
+        return WeekSummary.WeekDay(
+            date: date,
+            minutes: Int(byDay[date, default: 0] / 60),
+            budgetMinutes: budget
+        )
+    }
+    summary.totalMinutes = summary.days.reduce(0) { $0 + $1.minutes }
     return summary
 }
 
-struct NoiseWeekReport: DeviceActivityReportScene {
-    let context: DeviceActivityReport.Context = .noiseWeek
+struct DistractionsWeekReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .distractionsWeek
     let content: (WeekSummary) -> WeekActivityView
 
     func makeConfiguration(
         representing data: DeviceActivityResults<DeviceActivityData>
     ) async -> WeekSummary {
-        await summarizeWeek(data)
+        await summarizeWeek(data, kind: .distractions)
     }
 }
 
@@ -218,7 +264,7 @@ struct MessagesWeekReport: DeviceActivityReportScene {
     func makeConfiguration(
         representing data: DeviceActivityResults<DeviceActivityData>
     ) async -> WeekSummary {
-        await summarizeWeek(data)
+        await summarizeWeek(data, kind: .messages)
     }
 }
 
@@ -226,15 +272,10 @@ struct WeekActivityView: View {
     let summary: WeekSummary
     let kind: ReportKind
 
-    private var tint: Color { kind == .noise ? NG.noise : NG.msg }
-
-    private var budgetMinutes: Int {
-        let config = BudgetConfig.load()
-        return kind == .noise ? config.noiseBudgetMinutes : config.messagesBudgetMinutes
-    }
+    private var tint: Color { kind == .distractions ? NG.distraction : NG.msg }
 
     private var dailyAverage: Int {
-        summary.days.isEmpty ? 0 : summary.totalMinutes / summary.days.count
+        summary.totalMinutes / 7
     }
 
     var body: some View {
@@ -250,7 +291,7 @@ struct WeekActivityView: View {
                 Spacer()
             }
 
-            if summary.days.isEmpty {
+            if !summary.hasUsage {
                 Text("No usage recorded in the last 7 days.")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(NG.inkSoft)
@@ -262,21 +303,19 @@ struct WeekActivityView: View {
                             y: .value("Minutes", day.minutes)
                         )
                         .foregroundStyle(
-                            day.minutes >= budgetMinutes && budgetMinutes > 0
-                                ? NG.alarm : tint
+                            day.reachedBudget ? NG.alarm : tint
                         )
                         .cornerRadius(4)
                     }
-                    if budgetMinutes > 0 {
-                        RuleMark(y: .value("Budget", budgetMinutes))
+                    ForEach(summary.days) { day in
+                        if let budget = day.budgetMinutes {
+                            LineMark(
+                                x: .value("Day", day.date, unit: .day),
+                                y: .value("Daily budget", budget)
+                            )
                             .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
                             .foregroundStyle(NG.inkSoft)
-                            .annotation(position: .topTrailing, alignment: .trailing) {
-                                Text("BUDGET \(budgetMinutes.asHoursMinutes)")
-                                    .font(.ngLabel(8.5))
-                                    .tracking(1)
-                                    .foregroundStyle(NG.inkSoft)
-                            }
+                        }
                     }
                 }
                 .chartXAxis {
