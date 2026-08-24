@@ -40,6 +40,60 @@ enum NG {
     }
 }
 
+/// The signature progress arc: a thick track, an angular-gradient sweep, and
+/// an endpoint dot so it reads as a needle rather than a donut. Defined once
+/// here because both the in-app gauge and the widgets draw it.
+struct RingArc: View {
+    let fraction: Double
+    let color: Color
+    let size: CGFloat
+    /// Drawn hollow when there is nothing to report yet, so an empty ring is
+    /// never mistaken for a zero measurement.
+    var isIndeterminate: Bool = false
+
+    private var stroke: CGFloat { max(6, size * 0.105) }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(color.opacity(0.16),
+                        style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+            if isIndeterminate {
+                Circle()
+                    .stroke(
+                        color.opacity(0.4),
+                        style: StrokeStyle(
+                            lineWidth: max(1.5, stroke * 0.28),
+                            lineCap: .round,
+                            dash: [1, max(4, stroke * 0.62)]
+                        )
+                    )
+            } else {
+                Circle()
+                    .trim(from: 0, to: max(0, min(1, fraction)))
+                    .stroke(
+                        AngularGradient(
+                            colors: [color.opacity(0.55), color],
+                            center: .center,
+                            startAngle: .degrees(0),
+                            endAngle: .degrees(360)
+                        ),
+                        style: StrokeStyle(lineWidth: stroke, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                if fraction > 0.03 {
+                    Circle()
+                        .fill(color)
+                        .frame(width: stroke * 0.5, height: stroke * 0.5)
+                        .offset(y: -size / 2 + stroke / 2)
+                        .rotationEffect(.degrees(360 * min(1, fraction)))
+                }
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 extension Color {
     /// Adaptive color from light/dark hex values (0xRRGGBB).
     init(light: UInt32, dark: UInt32) {

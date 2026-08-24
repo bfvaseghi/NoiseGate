@@ -12,7 +12,7 @@ struct SettingsView: View {
                 PosterHeader(
                     eyebrow: "Daily budgets",
                     title: "BUDGETS.",
-                    detail: "Each ledger gets its own target and optional checkpoint nudges."
+                    detail: "Distractions and Messages each get their own daily target."
                 )
                 .padding(.top, 8)
 
@@ -67,7 +67,7 @@ struct SettingsView: View {
                         if model.notificationStatus == .denied {
                             Text("Notifications are denied in iPhone Settings. Tracking and widgets continue normally.")
                         } else {
-                            Text("Each enabled nudge is sent at most once per day, per ledger. Nothing is blocked.")
+                            Text("Each enabled notification is sent at most once per day, per category. Nothing is blocked.")
                         }
                     }
                     .font(.system(size: 12.5, weight: .medium))
@@ -328,7 +328,7 @@ struct AccentPicker: View {
                 }
                 Spacer()
             }
-            Text("Colours the Distractions ledger everywhere, including widgets. Messages keeps its own colour.")
+            Text("Colours Distractions everywhere, including widgets. Messages keeps its own colour.")
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
         }

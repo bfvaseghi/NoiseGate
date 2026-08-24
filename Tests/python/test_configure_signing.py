@@ -59,10 +59,15 @@ class ConfigureSigningTests(unittest.TestCase):
         self.assertEqual(signing.configured_app_group(group, app_bundle_id), group)
 
     def test_refuses_incomplete_project(self):
-        missing_target = self.project.replace(
-            "        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.report\n",
-            "",
+        # Derive the fixtures from whatever identifiers project.yml currently
+        # holds. Hardcoding the com.example.* placeholders made these silent
+        # no-ops — and therefore guaranteed failures — the moment the owner
+        # ran the configurator for real, which is step one of the README.
+        target_line = self._line_containing(
+            "PRODUCT_BUNDLE_IDENTIFIER:", suffix=".report"
         )
+        missing_target = self.project.replace(target_line, "", 1)
+        self.assertNotEqual(missing_target, self.project)
         with self.assertRaises(ValueError):
             signing.configured_project(
                 missing_target,
@@ -70,17 +75,22 @@ class ConfigureSigningTests(unittest.TestCase):
                 "com.bfvaseghi.noisegate",
             )
 
-        missing_group = self.project.replace(
-            "          - group.com.example.noisegate\n",
-            "",
-            1,
-        )
+        group_line = self._line_containing("- group.")
+        missing_group = self.project.replace(group_line, "", 1)
+        self.assertNotEqual(missing_group, self.project)
         with self.assertRaises(ValueError):
             signing.configured_project(
                 missing_group,
                 "Z9Y8X7W6V5",
                 "com.bfvaseghi.noisegate",
             )
+
+    def _line_containing(self, needle, suffix=None):
+        """The first whole line matching `needle` (and ending in `suffix`)."""
+        for line in self.project.splitlines(keepends=True):
+            if needle in line and (suffix is None or line.rstrip().endswith(suffix)):
+                return line
+        self.fail(f"project.yml has no line containing {needle!r}")
 
 
 if __name__ == "__main__":

@@ -59,7 +59,7 @@ struct MenuView: View {
 
             MacWeekChart(records: model.weekRecords)
 
-            Text("Only time accrued while selected enters a ledger. Everything else is noise. Nothing is blocked.")
+            Text("Only the apps you selected are counted. Everything else is untracked. Nothing is blocked.")
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
 
@@ -157,7 +157,7 @@ struct MacSettingsView: View {
             .tabItem { Label("Messages", systemImage: "message") }
         }
         .frame(width: 520, height: 460)
-        .alert("NoiseGate needs attention", isPresented: Binding(
+        .alert("Something went wrong", isPresented: Binding(
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
         )) {
@@ -280,7 +280,7 @@ struct AppPickerTab: View {
                 }
             }
             HStack {
-                Text("Only time accrued while selected enters a ledger.")
+                Text("Only time spent while an app is selected is counted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()

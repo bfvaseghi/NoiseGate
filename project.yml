@@ -212,6 +212,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.tests
         TARGETED_DEVICE_FAMILY: "1,2"
+        # Without this the .xctest bundle is built with no Info.plist, which
+        # also means the bundle identifier above never reaches the product.
+        GENERATE_INFOPLIST_FILE: YES
 
   NoiseGateMacTests:
     type: bundle.unit-test
@@ -223,3 +226,4 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.mac.tests
+        GENERATE_INFOPLIST_FILE: YES

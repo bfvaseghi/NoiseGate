@@ -89,16 +89,31 @@ struct MacSnapshotProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> Timeline<MacSnapshotEntry> {
         let now = Date()
-        let entry = makeEntry(
-            focus: configuration.focus,
-            includeHistory: context.family == .systemLarge,
-            now: now
-        )
+        let includeHistory = context.family == .systemLarge
+        let entry = makeEntry(focus: configuration.focus,
+                              includeHistory: includeHistory,
+                              now: now)
+        var entries = [entry]
+
+        // If the tracker stops heartbeating, show the paused state as a second
+        // scheduled entry. Rendering it costs nothing, whereas asking WidgetKit
+        // to reload at the staleness deadline would burn the refresh budget and
+        // get the widget throttled.
+        if let staleDate = WidgetRefreshSchedule.macStaleEntryDate(
+            snapshot: entry.snapshot, now: now
+        ) {
+            entries.append(
+                makeEntry(focus: configuration.focus,
+                          includeHistory: includeHistory,
+                          now: staleDate)
+            )
+        }
+
         let refresh = WidgetRefreshSchedule.macNextRefresh(
             snapshot: entry.snapshot,
             now: now
         )
-        return Timeline(entries: [entry], policy: .after(refresh))
+        return Timeline(entries: entries, policy: .after(refresh))
     }
 
     private func makeEntry(

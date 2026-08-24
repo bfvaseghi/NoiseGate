@@ -17,7 +17,7 @@ struct NoiseView: View {
                 PosterHeader(
                     eyebrow: "Signal only",
                     title: "APPS.",
-                    detail: "Choose only what wastes attention. Everything else stays invisible."
+                    detail: "Only the apps listed here are counted. Everything else stays untracked."
                 )
                 .padding(.top, 8)
 

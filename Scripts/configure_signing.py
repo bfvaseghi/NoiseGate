@@ -26,6 +26,10 @@ TARGET_SUFFIXES = {
     "NoiseGateMacTests": ".mac.tests",
 }
 
+# Every target that carries the App Group entitlement. The two test bundles
+# do not, which is why this is smaller than TARGET_SUFFIXES.
+EXPECTED_APP_GROUP_ENTRIES = 6
+
 
 PLACEHOLDER_TEAM_IDS = {"YOURTEAMID", "ABCDE12345"}
 PLACEHOLDER_APP_BUNDLE_IDS = {
@@ -90,8 +94,11 @@ def configured_project(source, team_id, app_bundle_id):
         raise ValueError(f"Could not find bundle IDs for: {', '.join(sorted(missing))}")
     if team_replacements != 1:
         raise ValueError(f"Expected one DEVELOPMENT_TEAM setting, found {team_replacements}")
-    if group_replacements != 6:
-        raise ValueError(f"Expected six App Group entries, found {group_replacements}")
+    if group_replacements != EXPECTED_APP_GROUP_ENTRIES:
+        raise ValueError(
+            f"Expected {EXPECTED_APP_GROUP_ENTRIES} App Group entries, "
+            f"found {group_replacements}"
+        )
     return "".join(result)
 
 
@@ -135,21 +142,42 @@ def replace_text_atomically(path, content):
             temporary_path.unlink()
 
 
-def apply_and_validate(changes):
+def verify_identifiers(app_bundle_id):
+    """Re-read what we just wrote and confirm only the identifier invariants.
+
+    Deliberately narrower than `validate_project.py`: that validator also
+    asserts unrelated structure, so running it here meant an in-progress
+    refactor elsewhere in the repo could block you from setting your Team ID.
+    """
+    project = (ROOT / "project.yml").read_text(encoding="utf-8")
+    app_group = (ROOT / "Shared/AppGroup.swift").read_text(encoding="utf-8")
+
+    for target, suffix in TARGET_SUFFIXES.items():
+        expected = f"PRODUCT_BUNDLE_IDENTIFIER: {app_bundle_id}{suffix}\n"
+        if expected not in project:
+            raise ValueError(f"{target} did not receive its bundle identifier")
+
+    group_entries = re.findall(r"^\s*- group\.[A-Za-z0-9.-]+\s*$", project, re.MULTILINE)
+    expected_group = f"group.{app_bundle_id}"
+    if len(group_entries) != EXPECTED_APP_GROUP_ENTRIES:
+        raise ValueError(
+            f"Expected {EXPECTED_APP_GROUP_ENTRIES} App Group entries, "
+            f"found {len(group_entries)}"
+        )
+    for entry in group_entries:
+        if entry.strip() != f"- {expected_group}":
+            raise ValueError(f"App Group entry not updated: {entry.strip()}")
+
+    if f'static let id = "{expected_group}"' not in app_group:
+        raise ValueError("Shared/AppGroup.swift does not match the entitlements")
+
+
+def apply_and_validate(changes, app_bundle_id):
     originals = {path: before for path, before, _ in changes}
     try:
         for path, _, after in changes:
             replace_text_atomically(path, after)
-        validation = subprocess.run(
-            [sys.executable, str(ROOT / "Scripts/validate_project.py")],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if validation.returncode != 0:
-            detail = validation.stdout.strip() or validation.stderr.strip()
-            raise ValueError(f"Project validation failed after configuration:\n{detail}")
+        verify_identifiers(app_bundle_id)
     except Exception:
         for path, before in originals.items():
             replace_text_atomically(path, before)
@@ -186,10 +214,13 @@ def main():
         print("Preview only. Run again with --apply after checking these values.")
         return
 
-    apply_and_validate([
-        (PROJECT_PATH, project_before, project_after),
-        (APP_GROUP_PATH, group_before, group_after),
-    ])
+    apply_and_validate(
+        [
+            (PROJECT_PATH, project_before, project_after),
+            (APP_GROUP_PATH, group_before, group_after),
+        ],
+        args.app_bundle_id,
+    )
     print(f"Configured Team {args.team_id}")
     print(f"App Bundle ID: {args.app_bundle_id}")
     print(f"App Group: group.{args.app_bundle_id}")

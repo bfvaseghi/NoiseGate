@@ -61,7 +61,7 @@ struct ContentView: View {
                 OnboardingView()
             }
         }
-        .alert("NoiseGate needs attention", isPresented: .init(
+        .alert("Something went wrong", isPresented: .init(
             get: { model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
         )) {
@@ -148,7 +148,7 @@ struct OnboardingView: View {
             }
             .padding(.bottom, 24)
 
-            Text("Apple Screen Time mixes distractions with useful activity. NoiseGate removes that noise. It tracks only the distracting apps you choose, plus Messages on a separate line. Everything else stays invisible.")
+            Text("NoiseGate tracks only the distracting apps you choose, plus Messages on a separate budget. Everything else on this device stays untracked, and nothing is ever blocked.")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
                 .frame(maxWidth: 340, alignment: .leading)

@@ -24,22 +24,31 @@ enum WidgetRefreshSchedule {
         return result
     }
 
+    /// Widget reloads are a rationed system resource — asking for one every
+    /// minute (or every few seconds, as a staleness deadline would) gets the
+    /// widget throttled and therefore *staler* than a modest cadence. The Mac
+    /// app reloads timelines itself whenever the numbers actually change, so
+    /// this only has to be a safety net that lands on the midnight reset.
     static func macNextRefresh(
         snapshot: UsageSnapshot,
         now: Date,
         calendar: Calendar = .autoupdatingCurrent
     ) -> Date {
-        let refresh: Date
-        if snapshot.monitoringIsActive {
-            let oneMinute = calendar.date(byAdding: .minute, value: 1, to: now)
-                ?? now.addingTimeInterval(60)
-            let staleDeadline = snapshot.updatedAt.addingTimeInterval(46)
-            refresh = max(now.addingTimeInterval(1), min(oneMinute, staleDeadline))
-        } else {
-            refresh = calendar.date(byAdding: .minute, value: 5, to: now)
-                ?? now.addingTimeInterval(300)
-        }
-        return min(refresh, nextMidnight(after: now, calendar: calendar))
+        let inFiveMinutes = calendar.date(byAdding: .minute, value: 5, to: now)
+            ?? now.addingTimeInterval(300)
+        return min(inFiveMinutes, nextMidnight(after: now, calendar: calendar))
+    }
+
+    /// When the tracker should be considered to have stopped heartbeating.
+    /// Rendered as a second timeline entry rather than a reload request, so
+    /// the paused state appears on time without spending refresh budget.
+    static func macStaleEntryDate(
+        snapshot: UsageSnapshot,
+        now: Date
+    ) -> Date? {
+        guard snapshot.monitoringIsActive else { return nil }
+        let deadline = snapshot.updatedAt.addingTimeInterval(46)
+        return deadline > now ? deadline : nil
     }
 
     private static func nextMidnight(

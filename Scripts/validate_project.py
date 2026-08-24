@@ -22,10 +22,10 @@ def text(path):
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def require_contains(path, snippets):
+def require_absent(path, snippets, reason):
     value = text(path)
     for snippet in snippets:
-        require(snippet in value, f"{path}: missing {snippet!r}")
+        require(snippet not in value, f"{path}: {reason} ({snippet!r})")
 
 
 project = text("project.yml")
@@ -100,66 +100,12 @@ if privacy_path.exists():
     require("1C8F.1" in user_defaults_reasons, "App Group UserDefaults reason is missing")
     require("CA92.1" in user_defaults_reasons, "Standard UserDefaults fallback reason is missing")
 
-require_contains("iOS/ScreenTimeShared/SelectionStore.swift", [
-    "FamilyActivitySelection(includeEntireCategory: false)",
-    "guard selection.categoryTokens.isEmpty",
-    "guard selection.categoryTokens.isEmpty,",
-])
-require_contains("iOS/App/Model/ScreenTimeModel.swift", [
-    ".subtracting(messagesSelection.applicationTokens)",
-    "guard !events.isEmpty else",
-    "second: 59",
-    "includesPastActivity: true",
-    "monitoringNeedsReconfigure",
-    "monitoringAcceptsCallbacks",
-    "monitoringGeneration",
-    "monitoringSchemaVersion",
-    "monitoringConfiguredAt",
-])
-require_contains("iOS/ScreenTimeShared/ThresholdEvent.swift", [
-    "static let schemaVersion = 3",
-    "budgetMinutes: Int",
-    "thresholdMinutes: Int",
-    "exactThreshold == thresholdMinutes",
-])
-require_contains("iOS/MonitorExtension/NoiseGateMonitor.swift", [
-    "parsed.generation",
-    "parsed.budgetMinutes",
-    "parsed.thresholdMinutes",
-    "ThresholdSnapshotReducer.apply(",
-])
-require_contains("Shared/UsageSnapshot.swift", [
-    "distractionsConfigured",
-    "messagesConfigured",
-    "monitoringIsActive: snap.monitoringIsActive",
-    "updatedAt: snap.updatedAt",
-])
-require_contains("Shared/HistoryStore.swift", [
-    "static func canonicalized",
-    "canonicalized(records).suffix(maxDays)",
-])
-require_contains("iOS/App/Views/TodayView.swift", [
-    ".init([.iPhone])",
-    "categories: []",
-    "activeDistractionApps",
-    "end: todayInterval.end",
-])
-require_contains("Shared/SharedStore.swift", [
-    "NSLock()",
-    "Darwin.lockf(descriptor, F_LOCK, 0)",
-    "Darwin.lockf(descriptor, F_ULOCK, 0)",
-    "func update<T: Codable>",
-])
-require_contains("macOS/App/MacModel.swift", [
-    "distractionSecondsByBundleID",
-    "messagesSecondsByBundleID",
-    "legacyUnclassifiedSeconds",
-    "NSWorkspace.willSleepNotification",
-    "SMAppService.mainApp.register()",
-    "@Published private(set) var distractionMinutesToday",
-    "private var nudgesSentToday",
-    "let heartbeatDue",
-])
+# NOTE: a block of ~90 `require_contains` source-substring assertions used to
+# live here. They pinned one implementation's exact text ("second: 59",
+# "let heartbeatDue"), so any honest refactor turned CI red and trained the
+# reader to ignore this file. The behaviour they stood in for is covered
+# properly by Tests/iOS/SharedModelTests.swift. Keep this validator for
+# cross-file invariants the compiler and the unit tests cannot see.
 
 ios_widget = text("iOS/Widget/NoiseGateWidget.swift")
 ios_family_match = re.search(r"\.supportedFamilies\(\[(.*?)\]\)", ios_widget, re.DOTALL)
@@ -206,12 +152,6 @@ for layout in ("case .systemSmall:", "case .systemMedium:", "case .systemLarge:"
     require(layout in mac_widget, f"Mac widget has no explicit layout for {layout}")
 require("accuracy: .exact" in mac_widget, "Mac widget must force exact presentation")
 
-require_contains("Shared/NoiseGateRoute.swift", [
-    'static let scheme = "noisegate"',
-    "url.path.isEmpty",
-    "url.query == nil",
-    "url.fragment == nil",
-])
 require("CFBundleURLTypes:" in project, "iOS deep-link URL type is missing")
 route_match = re.search(
     r'static let scheme = "([a-z][a-z0-9+.-]*)"',
