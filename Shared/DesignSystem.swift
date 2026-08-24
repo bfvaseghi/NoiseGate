@@ -27,8 +27,9 @@ enum NG {
     // Voice
     static let alarm     = Color(light: 0xE0231E, dark: 0xF23B33)
     static let alarmDeep = Color(light: 0x8E0E0C, dark: 0x7A0B09)
-    // Categories
-    static let distraction = Color(light: 0xE07C0E, dark: 0xF59A2E)
+    // Categories. The Distractions accent is user-selectable; Messages and
+    // focus stay fixed so the two ledgers never read as the same colour.
+    static var distraction: Color { AccentTheme.current.color }
     static let msg   = Color(light: 0x18988F, dark: 0x2BB3A9)
     static let focus = Color(light: 0x5B5BD6, dark: 0x8181E8)
 

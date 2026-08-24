@@ -1,8 +1,10 @@
 import SwiftUI
 import UserNotifications
+import WidgetKit
 
 struct SettingsView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @State private var accent = AccentTheme.current
 
     var body: some View {
         ScrollView {
@@ -73,6 +75,8 @@ struct SettingsView: View {
                 }
                 .ngCard(padding: 16)
 
+                AccentPicker(selection: $accent)
+
                 Spacer(minLength: 96)
             }
             .frame(maxWidth: 560)
@@ -99,6 +103,15 @@ struct BudgetDial: View {
     let caption: String
     let adjust: (Int) -> Void
 
+    /// Common targets, so a large change is one tap instead of dozens.
+    private static let presets = [15, 30, 45, 60, 90, 120]
+
+    /// Live value while a drag is in flight. The committed budget only changes
+    /// on release, so a drag never triggers a write-and-reschedule per pixel.
+    @State private var dragMinutes: Int?
+
+    private var shownMinutes: Int { dragMinutes ?? minutes }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             NGChip(text: chip, tint: tint)
@@ -109,7 +122,7 @@ struct BudgetDial: View {
                 ) { adjust(-5) }
                 Spacer()
                 VStack(spacing: 0) {
-                    Text(minutes.asHoursMinutes)
+                    Text(shownMinutes.asHoursMinutes)
                         .font(.ngNumber(44))
                         .foregroundStyle(NG.ink)
                         .contentTransition(.numericText())
@@ -124,13 +137,57 @@ struct BudgetDial: View {
                     accessibilityLabel: "Increase \(chip) budget"
                 ) { adjust(+5) }
             }
+
+            // Drag anywhere on the track for coarse changes; the paddles above
+            // stay for fine 5-minute steps and for VoiceOver/Switch Control.
+            BudgetTrack(
+                minutes: shownMinutes,
+                tint: tint,
+                onDrag: { dragMinutes = $0 },
+                onCommit: { target in
+                    dragMinutes = nil
+                    if target != minutes { adjust(target - minutes) }
+                }
+            )
+            .accessibilityHidden(true)
+
+            HStack(spacing: 6) {
+                ForEach(Self.presets, id: \.self) { preset in
+                    Button {
+                        adjust(preset - minutes)
+                    } label: {
+                        Text(preset.asHoursMinutes)
+                            .font(.ngLabel(10.5))
+                            .tracking(0.6)
+                            .foregroundStyle(minutes == preset ? .white : NG.inkSoft)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(
+                                minutes == preset ? tint : NG.line.opacity(0.55),
+                                in: Capsule()
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Set \(chip) budget to \(preset.asHoursMinutes)")
+                }
+            }
+
             Text(caption)
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(NG.inkSoft)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .ngCard()
-        .sensoryFeedback(.selection, trigger: minutes)
+        .sensoryFeedback(.selection, trigger: shownMinutes)
+        .accessibilityElement(children: .contain)
+        .accessibilityValue("\(minutes.asHoursMinutes) per day")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: adjust(5)
+            case .decrement: adjust(-5)
+            @unknown default: break
+            }
+        }
     }
 
     private func Paddle(
@@ -148,5 +205,134 @@ struct BudgetDial: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Draggable budget track spanning 5 minutes to 8 hours. Uses a square-root
+/// scale so the common 15m–2h range gets most of the travel instead of being
+/// squeezed into the first eighth of a linear track.
+struct BudgetTrack: View {
+    let minutes: Int
+    let tint: Color
+    /// Fires continuously during a drag for live display only.
+    let onDrag: (Int) -> Void
+    /// Fires once on release; the only path that persists a new budget.
+    let onCommit: (Int) -> Void
+
+    private static let minMinutes = 5.0
+    private static let maxMinutes = 480.0
+
+    private static func position(for minutes: Double) -> Double {
+        let clamped = min(maxMinutes, max(minMinutes, minutes))
+        return ((clamped - minMinutes) / (maxMinutes - minMinutes)).squareRoot()
+    }
+
+    private static func minutes(atPosition position: Double) -> Int {
+        let clamped = min(1, max(0, position))
+        let raw = minMinutes + clamped * clamped * (maxMinutes - minMinutes)
+        // Snap to the same 5-minute grid the paddles use.
+        return Int((raw / 5).rounded()) * 5
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let fraction = Self.position(for: Double(minutes))
+            let knobX = geo.size.width * fraction
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(NG.line.opacity(0.7))
+                    .frame(height: 8)
+                Capsule()
+                    .fill(tint)
+                    .frame(width: max(8, knobX), height: 8)
+                Circle()
+                    .fill(NG.card)
+                    .overlay(Circle().strokeBorder(tint, lineWidth: 3))
+                    .frame(width: 22, height: 22)
+                    .shadow(color: NG.ink.opacity(0.16), radius: 4, y: 2)
+                    .offset(x: max(0, min(geo.size.width - 22, knobX - 11)))
+            }
+            .frame(height: 22)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard geo.size.width > 0 else { return }
+                        let target = Self.minutes(
+                            atPosition: value.location.x / geo.size.width
+                        )
+                        if target != minutes { onDrag(target) }
+                    }
+                    .onEnded { value in
+                        guard geo.size.width > 0 else { return }
+                        onCommit(Self.minutes(atPosition: value.location.x / geo.size.width))
+                    }
+            )
+        }
+        .frame(height: 22)
+    }
+}
+
+/// Accent selector for the Distractions ledger. Writing the choice reloads
+/// widget timelines so the Home Screen picks up the new colour immediately.
+struct AccentPicker: View {
+    @Binding var selection: AccentTheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: "paintpalette")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        selection.color,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                Text("Accent")
+                    .font(.system(size: 15.5, weight: .bold))
+                    .foregroundStyle(NG.ink)
+                Spacer()
+                Text(selection.displayName.uppercased())
+                    .font(.ngLabel(10))
+                    .tracking(1.5)
+                    .foregroundStyle(NG.inkSoft)
+            }
+            HStack(spacing: 10) {
+                ForEach(AccentTheme.allCases) { theme in
+                    Button {
+                        selection = theme
+                        AccentTheme.select(theme)
+                        WidgetCenter.shared.reloadAllTimelines()
+                    } label: {
+                        Circle()
+                            .fill(theme.color)
+                            .frame(width: 34, height: 34)
+                            .overlay {
+                                if theme == selection {
+                                    Circle()
+                                        .strokeBorder(NG.card, lineWidth: 3)
+                                        .padding(2)
+                                }
+                            }
+                            .overlay {
+                                Circle().strokeBorder(
+                                    theme == selection ? NG.ink : NG.line,
+                                    lineWidth: theme == selection ? 2 : 1
+                                )
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(theme.displayName)
+                    .accessibilityAddTraits(theme == selection ? [.isSelected] : [])
+                }
+                Spacer()
+            }
+            Text("Colours the Distractions ledger everywhere, including widgets. Messages keeps its own colour.")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(NG.inkSoft)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ngCard(padding: 16)
     }
 }

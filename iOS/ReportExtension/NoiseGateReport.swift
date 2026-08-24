@@ -23,6 +23,12 @@ struct NoiseGateReportExtension: DeviceActivityReportExtension {
         MessagesWeekReport { summary in
             WeekActivityView(summary: summary, kind: .messages)
         }
+        DistractionsRhythmReport { summary in
+            RhythmView(summary: summary, kind: .distractions)
+        }
+        MessagesRhythmReport { summary in
+            RhythmView(summary: summary, kind: .messages)
+        }
     }
 }
 
@@ -41,6 +47,8 @@ extension DeviceActivityReport.Context {
     static let messages = Self("Messages")
     static let distractionsWeek = Self("Distractions Week")
     static let messagesWeek = Self("Messages Week")
+    static let distractionsRhythm = Self("Distractions Rhythm")
+    static let messagesRhythm = Self("Messages Rhythm")
 }
 
 enum ReportKind { case distractions, messages }
@@ -338,5 +346,214 @@ struct WeekActivityView: View {
         }
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Rhythm (hour-of-day pattern, exact, inside the privacy sandbox)
+
+/// Which hours of the day the tracked ledger actually accumulates. Averaged
+/// across the filtered range so one unusual evening doesn't read as a habit.
+struct RhythmSummary {
+    /// 24 buckets, index == hour of day, holding average minutes per day.
+    var hourAverages: [Double] = Array(repeating: 0, count: 24)
+    /// Number of distinct days observed, used to average the buckets.
+    var dayCount: Int = 0
+    var totalMinutes: Int = 0
+
+    var peakHour: Int? {
+        guard let maxValue = hourAverages.max(), maxValue > 0 else { return nil }
+        return hourAverages.firstIndex(of: maxValue)
+    }
+
+    /// The contiguous 3-hour window carrying the most time, as a start hour.
+    var peakWindowStart: Int? {
+        guard hourAverages.contains(where: { $0 > 0 }) else { return nil }
+        var best = 0
+        var bestTotal = -1.0
+        for start in 0..<24 {
+            let total = (0..<3).reduce(0.0) { sum, offset in
+                sum + hourAverages[(start + offset) % 24]
+            }
+            if total > bestTotal {
+                bestTotal = total
+                best = start
+            }
+        }
+        return best
+    }
+}
+
+private func summarizeRhythm(
+    _ data: DeviceActivityResults<DeviceActivityData>
+) async -> RhythmSummary {
+    var buckets = Array(repeating: 0.0, count: 24)
+    var days: Set<Date> = []
+    var total = 0.0
+    let calendar = Calendar.current
+
+    // The host passes an `.hourly()` segment filter, so each segment is one
+    // hour of one day; bucket by that hour and count the distinct days seen.
+    for await deviceData in data {
+        for await segment in deviceData.activitySegments {
+            let start = segment.dateInterval.start
+            let hour = calendar.component(.hour, from: start)
+            let duration = segment.totalActivityDuration
+            guard duration > 0 else { continue }
+            buckets[hour] += duration
+            total += duration
+            days.insert(calendar.startOfDay(for: start))
+        }
+    }
+
+    var summary = RhythmSummary()
+    summary.dayCount = days.count
+    let divisor = Double(max(1, days.count))
+    summary.hourAverages = buckets.map { $0 / 60 / divisor }
+    summary.totalMinutes = Int(total / 60)
+    return summary
+}
+
+struct DistractionsRhythmReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .distractionsRhythm
+    let content: (RhythmSummary) -> RhythmView
+
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> RhythmSummary {
+        await summarizeRhythm(data)
+    }
+}
+
+struct MessagesRhythmReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .messagesRhythm
+    let content: (RhythmSummary) -> RhythmView
+
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> RhythmSummary {
+        await summarizeRhythm(data)
+    }
+}
+
+/// Hour-of-day columns with the peak window called out. Answers "when does
+/// this happen?", which a daily total can never show.
+struct RhythmView: View {
+    let summary: RhythmSummary
+    let kind: ReportKind
+
+    private var tint: Color { kind == .distractions ? NG.distraction : NG.msg }
+
+    private var peakLabel: String? {
+        guard let start = summary.peakWindowStart,
+              summary.totalMinutes > 0 else { return nil }
+        let end = (start + 3) % 24
+        return "\(RhythmView.hourLabel(start))–\(RhythmView.hourLabel(end))"
+    }
+
+    static func hourLabel(_ hour: Int) -> String {
+        var components = DateComponents()
+        components.hour = hour
+        let date = Calendar.current.date(from: components) ?? Date()
+        return date.formatted(.dateTime.hour())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let peakLabel {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(peakLabel)
+                            .font(.ngNumber(26))
+                            .foregroundStyle(NG.ink)
+                        Text("BUSIEST WINDOW")
+                            .font(.ngLabel(9.5))
+                            .tracking(1.8)
+                            .foregroundStyle(NG.inkSoft)
+                    }
+                } else {
+                    Text("Not enough data yet")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(NG.inkSoft)
+                }
+                Spacer()
+                if summary.dayCount > 0, summary.totalMinutes > 0 {
+                    Text("AVG OF \(summary.dayCount) DAY\(summary.dayCount == 1 ? "" : "S")")
+                        .font(.ngLabel(9.5))
+                        .tracking(1.5)
+                        .foregroundStyle(NG.inkSoft)
+                }
+            }
+
+            if summary.totalMinutes > 0 {
+                RhythmBars(
+                    values: summary.hourAverages,
+                    tint: tint,
+                    peakWindowStart: summary.peakWindowStart
+                )
+                .frame(height: 96)
+                .accessibilityElement()
+                .accessibilityLabel("Hour of day pattern")
+                .accessibilityValue(
+                    peakLabel.map { "Busiest between \($0)" } ?? "No usage recorded"
+                )
+            } else {
+                Text("Once there are a few days of activity, this shows which hours it lands in.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(NG.inkSoft)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 18)
+            }
+        }
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 24 slim columns with 6-hour gridlines. Drawn directly rather than with
+/// Charts so the hour axis stays legible at widget-card width.
+struct RhythmBars: View {
+    let values: [Double]
+    let tint: Color
+    let peakWindowStart: Int?
+
+    private var maxValue: Double { max(values.max() ?? 1, 0.0001) }
+
+    private func isPeak(_ hour: Int) -> Bool {
+        guard let start = peakWindowStart else { return false }
+        return (0..<3).contains { (start + $0) % 24 == hour }
+    }
+
+    var body: some View {
+        VStack(spacing: 5) {
+            GeometryReader { geo in
+                let slot = geo.size.width / 24
+                let barWidth = max(3, slot * 0.62)
+                ZStack(alignment: .bottomLeading) {
+                    // Quarter-day gridlines give the eye something to anchor on.
+                    ForEach([6, 12, 18], id: \.self) { hour in
+                        Rectangle()
+                            .fill(NG.line)
+                            .frame(width: 1)
+                            .offset(x: slot * CGFloat(hour) + slot / 2)
+                    }
+                    ForEach(0..<24, id: \.self) { hour in
+                        let height = geo.size.height * (values[hour] / maxValue)
+                        Capsule()
+                            .fill(isPeak(hour) ? tint : tint.opacity(0.28))
+                            .frame(width: barWidth, height: max(2, height))
+                            .offset(x: slot * CGFloat(hour) + (slot - barWidth) / 2)
+                    }
+                }
+            }
+            HStack(spacing: 0) {
+                ForEach([0, 6, 12, 18], id: \.self) { hour in
+                    Text(RhythmView.hourLabel(hour))
+                        .font(.ngLabel(8.5))
+                        .tracking(0.8)
+                        .foregroundStyle(NG.inkSoft)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
     }
 }

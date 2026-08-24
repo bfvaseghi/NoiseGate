@@ -6,15 +6,16 @@ enum AppGroup {
     /// `Scripts/configure_signing.py`. Never edit one target in isolation.
     static let id = "group.com.example.noisegate"
 
-    static var defaults: UserDefaults {
-        UserDefaults(suiteName: id) ?? .standard
-    }
+    /// Resolved once per process. `UserDefaults` is thread-safe, and this is
+    /// read from view bodies and five-second tracker ticks, so re-running the
+    /// suite lookup every access is pure waste.
+    static let defaults: UserDefaults = UserDefaults(suiteName: id) ?? .standard
 
-    static var containerURL: URL? {
-        FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: id
-        )
-    }
+    /// Also resolved once: `containerURL(forSecurityApplicationGroupIdentifier:)`
+    /// hits the filesystem, and `SharedStore` asks for it on every locked write.
+    static let containerURL: URL? = FileManager.default.containerURL(
+        forSecurityApplicationGroupIdentifier: id
+    )
 }
 
 enum StoreKey {
@@ -33,6 +34,7 @@ enum StoreKey {
     static let monitoringGeneration = "monitoringGeneration.v2"
     static let monitoringConfiguredAt = "monitoringConfiguredAt.v2"
     static let usageHistory = "usageHistory"        // [DayRecord] JSON — finished days
+    static let accentTheme = "accentTheme"          // AccentTheme rawValue
     static let macDistractionApps = "macNoiseApps"  // [String] bundle ids (macOS)
     static let macMessagesApps = "macMessagesApps"  // [String] bundle ids (macOS)
     static let macSelections = "macSelections.v2"   // MacSelections JSON (macOS)

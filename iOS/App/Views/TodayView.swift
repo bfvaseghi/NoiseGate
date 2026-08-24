@@ -9,12 +9,32 @@ extension DeviceActivityReport.Context {
     static let messages = Self("Messages")
     static let distractionsWeek = Self("Distractions Week")
     static let messagesWeek = Self("Messages Week")
+    static let distractionsRhythm = Self("Distractions Rhythm")
+    static let messagesRhythm = Self("Messages Rhythm")
 }
 
 enum StatsRange: String, CaseIterable, Identifiable {
     case today = "Today"
     case week = "7 Days"
+    case rhythm = "Rhythm"
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: return "TODAY."
+        case .week: return "7 DAYS."
+        case .rhythm: return "RHYTHM."
+        }
+    }
+
+    /// Report context for this range, per ledger.
+    func context(distractions: Bool) -> DeviceActivityReport.Context {
+        switch self {
+        case .today: return distractions ? .distractions : .messages
+        case .week: return distractions ? .distractionsWeek : .messagesWeek
+        case .rhythm: return distractions ? .distractionsRhythm : .messagesRhythm
+        }
+    }
 }
 
 /// Usage overview: exact durations rendered by the report extension
@@ -23,6 +43,7 @@ enum StatsRange: String, CaseIterable, Identifiable {
 struct TodayView: View {
     @EnvironmentObject private var model: ScreenTimeModel
     @State private var snapshot = UsageSnapshot.loadToday()
+    @State private var history: [DayRecord] = HistoryStore.lastDays(30)
     @State private var range: StatsRange = .today
 
     private let refresh = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
@@ -46,8 +67,13 @@ struct TodayView: View {
         apps: Set<ApplicationToken>,
         webDomains: Set<WebDomainToken>
     ) -> DeviceActivityFilter {
-        DeviceActivityFilter(
-            segment: .daily(during: range == .today ? todayInterval : weekInterval),
+        // Rhythm needs hour-of-day resolution; the other ranges only need
+        // daily totals, which is far cheaper for Screen Time to compute.
+        let segment: DeviceActivityFilter.SegmentInterval = range == .rhythm
+            ? .hourly(during: weekInterval)
+            : .daily(during: range == .today ? todayInterval : weekInterval)
+        return DeviceActivityFilter(
+            segment: segment,
             users: .all,
             devices: UIDevice.current.userInterfaceIdiom == .pad
                 ? .init([.iPad]) : .init([.iPhone]),
@@ -69,17 +95,30 @@ struct TodayView: View {
         !model.activeMessagesApps.isEmpty
     }
 
-    private var reportHeight: CGFloat { range == .today ? 168 : 214 }
+    private var reportHeight: CGFloat {
+        switch range {
+        case .today: return 168
+        case .week: return 214
+        case .rhythm: return 186
+        }
+    }
+
+    private var headerDetail: String {
+        let span = "\(weekInterval.start.formatted(.dateTime.day().month())) – \(Date.now.formatted(.dateTime.day().month()))"
+        switch range {
+        case .today: return Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        case .week: return span
+        case .rhythm: return "Hour of day · \(span)"
+        }
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
                 PosterHeader(
                     eyebrow: "NoiseGate",
-                    title: range == .today ? "TODAY." : "7 DAYS.",
-                    detail: range == .today
-                        ? Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))
-                        : "\(weekInterval.start.formatted(.dateTime.day().month())) – \(Date.now.formatted(.dateTime.day().month()))"
+                    title: range.title,
+                    detail: headerDetail
                 )
                 .padding(.top, 8)
 
@@ -103,7 +142,7 @@ struct TodayView: View {
                             : "All distracting apps are paused or counted in Messages.")
                     } else {
                         DeviceActivityReport(
-                            range == .today ? .distractions : .distractionsWeek,
+                            range.context(distractions: true),
                             filter: filter(
                                 apps: model.activeDistractionApps,
                                 webDomains: model.activeDistractionWebDomains
@@ -124,7 +163,7 @@ struct TodayView: View {
                             : "Messages tracking is currently paused.")
                     } else {
                         DeviceActivityReport(
-                            range == .today ? .messages : .messagesWeek,
+                            range.context(distractions: false),
                             filter: filter(
                                 apps: model.activeMessagesApps,
                                 webDomains: []
@@ -133,6 +172,10 @@ struct TodayView: View {
                         .frame(height: reportHeight)
                         .id("messages-\(range.rawValue)")
                     }
+                }
+
+                if range == .today {
+                    StreakCard(records: history, snapshot: snapshot)
                 }
 
                 Text("Only Distractions and Messages are counted. Everything else is excluded as noise. Nothing is blocked.")
@@ -148,18 +191,26 @@ struct TodayView: View {
         }
         .scrollIndicators(.hidden)
         .background(NG.paper.ignoresSafeArea())
-        .onAppear { snapshot = UsageSnapshot.loadToday() }
-        .onReceive(refresh) { _ in snapshot = UsageSnapshot.loadToday() }
+        .onAppear {
+            snapshot = UsageSnapshot.loadToday()
+            history = HistoryStore.lastDays(30)
+        }
+        .onReceive(refresh) { _ in
+            snapshot = UsageSnapshot.loadToday()
+            history = HistoryStore.lastDays(30)
+        }
     }
 
     private func budgetLabel(_ minutes: Int) -> String {
-        range == .today
-            ? "BUDGET \(minutes.asHoursMinutes)"
-            : "BUDGET \(minutes.asHoursMinutes)/DAY"
+        switch range {
+        case .today: return "BUDGET \(minutes.asHoursMinutes)"
+        case .week: return "BUDGET \(minutes.asHoursMinutes)/DAY"
+        case .rhythm: return "AVG PER DAY"
+        }
     }
 }
 
-/// Compact capsule switcher between Today and 7 Days, matching the tab bar.
+/// Compact capsule switcher across the three views, matching the tab bar.
 struct RangePicker: View {
     @Binding var selection: StatsRange
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -178,7 +229,7 @@ struct RangePicker: View {
                         .font(.ngLabel(11))
                         .tracking(1.5)
                         .foregroundStyle(selection == range ? .white : NG.inkSoft)
-                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background {
                             if selection == range {
@@ -262,5 +313,103 @@ struct MissingSelectionRow: View {
             .font(.system(size: 14, weight: .medium))
             .foregroundStyle(NG.inkSoft)
             .padding(.vertical, 8)
+    }
+}
+
+/// Distraction trend over finished days: how many stayed under budget, the
+/// current run, the daily average, and the change against the prior week.
+/// Numbers only — no praise, no scolding.
+struct StreakCard: View {
+    let records: [DayRecord]
+    let snapshot: UsageSnapshot
+
+    private var stats: StreakStats.Summary {
+        StreakStats.distractions(records: records, snapshot: snapshot)
+    }
+
+    var body: some View {
+        let stats = self.stats
+        // One finished day is not yet a pattern; the trend pill has its own,
+        // stricter threshold inside `StreakStats`.
+        if stats.totalDays >= 2 {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Text("DISTRACTIONS · LAST \(stats.totalDays) DAYS")
+                        .font(.ngLabel(10))
+                        .tracking(2)
+                        .foregroundStyle(NG.inkSoft)
+                    Spacer()
+                    if let trend = stats.trendPercent, trend != 0 {
+                        TrendPill(percent: trend)
+                    }
+                }
+                HStack(alignment: .top, spacing: 0) {
+                    StatColumn(
+                        value: "\(stats.underBudgetDays)/\(stats.totalDays)",
+                        label: "UNDER BUDGET"
+                    )
+                    Divider().frame(height: 34)
+                    StatColumn(
+                        value: stats.underBudgetRun == 0 ? "—" : "\(stats.underBudgetRun)",
+                        label: stats.underBudgetRun == 1 ? "DAY RUNNING" : "DAYS RUNNING"
+                    )
+                    Divider().frame(height: 34)
+                    StatColumn(
+                        value: stats.averageMinutes.asHoursMinutes,
+                        label: "DAILY AVERAGE"
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .ngCard(padding: 16)
+        }
+    }
+}
+
+private struct StatColumn: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.ngNumber(21))
+                .foregroundStyle(NG.ink)
+                .minimumScaleFactor(0.7)
+                .lineLimit(1)
+            Text(label)
+                .font(.ngLabel(9))
+                .tracking(1.2)
+                .foregroundStyle(NG.inkSoft)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Signed change vs. the prior week. Down is drawn calm, up is drawn warm —
+/// no value judgment in the words, only in the arrow.
+private struct TrendPill: View {
+    let percent: Int
+
+    private var isDown: Bool { percent < 0 }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: isDown ? "arrow.down.right" : "arrow.up.right")
+                .font(.system(size: 9, weight: .black))
+            Text("\(abs(percent))%")
+                .font(.ngLabel(10))
+                .tracking(0.5)
+        }
+        .foregroundStyle(isDown ? NG.msg : NG.distraction)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background((isDown ? NG.msg : NG.distraction).opacity(0.14), in: Capsule())
+        .accessibilityLabel(
+            isDown ? "Down \(abs(percent)) percent vs. prior week"
+                   : "Up \(percent) percent vs. prior week"
+        )
     }
 }

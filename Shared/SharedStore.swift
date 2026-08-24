@@ -15,6 +15,14 @@ final class SharedStore {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
+    /// Opened once and reused. Re-opening per access cost an open/close
+    /// syscall pair on paths as hot as widget timeline reads and the Mac's
+    /// five-second tick. Advisory `lockf` locks are owned per process and
+    /// `processLock` already serialises callers within this process, so a
+    /// single shared descriptor is both correct and cheaper. Only ever
+    /// touched while `processLock` is held.
+    private var cachedDescriptor: Int32?
+
     init(
         defaults: UserDefaults = AppGroup.defaults,
         lockFileURL: URL? = AppGroup.containerURL?
@@ -22,6 +30,12 @@ final class SharedStore {
     ) {
         self.defaults = defaults
         self.lockFileURL = lockFileURL
+    }
+
+    deinit {
+        if let cachedDescriptor, cachedDescriptor >= 0 {
+            Darwin.close(cachedDescriptor)
+        }
     }
 
     func load<T: Decodable>(_ type: T.Type, forKey key: String) -> T? {
@@ -87,23 +101,37 @@ final class SharedStore {
 
     private func withExclusiveAccess<T>(_ body: () -> T) -> T {
         processLock.lock()
-        let descriptor = lockFileURL.map {
-            Darwin.open($0.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        } ?? -1
+        let descriptor = openLockFileIfNeeded()
         let hasFileLock = descriptor >= 0 && acquireFileLock(descriptor)
         defaults.synchronize()
 
         defer {
             defaults.synchronize()
-            if descriptor >= 0 {
-                if hasFileLock {
-                    _ = Darwin.lockf(descriptor, F_ULOCK, 0)
-                }
-                Darwin.close(descriptor)
+            if hasFileLock {
+                _ = Darwin.lockf(descriptor, F_ULOCK, 0)
             }
             processLock.unlock()
         }
         return body()
+    }
+
+    /// Resolves the shared descriptor, opening it on first use. `-1` is cached
+    /// too, so a container that cannot be opened degrades to the process lock
+    /// alone instead of retrying the syscall on every access.
+    /// Must be called with `processLock` held.
+    private func openLockFileIfNeeded() -> Int32 {
+        if let cachedDescriptor { return cachedDescriptor }
+        guard let lockFileURL else {
+            cachedDescriptor = -1
+            return -1
+        }
+        let descriptor = Darwin.open(
+            lockFileURL.path,
+            O_CREAT | O_RDWR | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        cachedDescriptor = descriptor
+        return descriptor
     }
 
     private func acquireFileLock(_ descriptor: Int32) -> Bool {

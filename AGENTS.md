@@ -38,7 +38,9 @@ Shared/
   NudgeText.swift               All iPhone and Mac notification copy
   WidgetPresentation.swift     Tested exact/lower-bound widget semantics
   NoiseGateRoute.swift         Stable iPhone widget deep links
+  StreakStats.swift             Tested run/average/trend arithmetic
   DesignSystem.swift            Adaptive visual tokens
+  AccentTheme.swift             User-selectable Distractions accent
   BudgetGauge.swift             Shared accessible ring
 iOS/
   App/                          SwiftUI app: Today / Apps / Budgets
@@ -194,15 +196,22 @@ twice.
 
 ### 9. Keep report contexts exact
 
-The host and report extension string-match these four contexts:
+The host and report extension string-match these six contexts:
 
 - `Distractions`
 - `Messages`
 - `Distractions Week`
 - `Messages Week`
+- `Distractions Rhythm`
+- `Messages Rhythm`
 
 The weekly report must zero-fill all seven calendar days and divide the average
 by seven, not only by days that had usage.
+
+The Rhythm scenes are the only ones given an `.hourly()` segment filter; every
+other range uses `.daily()`, which is far cheaper for Screen Time to compute.
+Rhythm buckets by hour of day and divides by the number of *distinct days
+observed*, so a single late night cannot read as a daily habit.
 
 ### 10. Keep persistence atomic and migrations tolerant
 
@@ -215,11 +224,28 @@ decode keys until a deliberate migration horizon is documented.  Existing
 v1 `noise*`, selection, pause, snapshot, history, and Mac ledger values must
 continue to load.
 
+### 11. Keep hot paths off the cross-process lock
+
+`SharedStore` takes a file lock, so it is for durable shared state only. Do not
+call it from a SwiftUI view body or a per-tick loop. `AppGroup.defaults` and
+`AppGroup.containerURL` resolve once per process, `SharedStore` keeps one lock
+descriptor open for its lifetime, and `AccentTheme.current` reads
+`AppGroup.defaults` directly because it is evaluated during rendering. Load
+history and snapshots into `@State` and refresh them on a timer instead of
+decoding inside `body`.
+
+Controls that can change continuously (the budget drag track) hold their live
+value in local `@State` and commit exactly once on release. Never persist or
+restart monitoring per drag event.
+
 ## Design rules
 
 - Use `NG.*` colors and `Font.ng*` typography.  Do not add raw view colors.
-- Orange (`NG.distraction`) means Distractions.  Teal means Messages.  Red is
-  reserved for the brand and reached-budget state.
+- `NG.distraction` means Distractions and is user-selectable via
+  `AccentTheme`; teal means Messages and stays fixed so the two ledgers never
+  collide.  Red is reserved for the brand and reached-budget state.
+- Statistics stay factual: report counts, averages, and signed change. The
+  trend arrow may carry direction, but the words never carry approval.
 - iPhone widget values always force lower-bound wording at the presentation
   boundary, even if a legacy snapshot omitted its `isFloor` marker.
 - iPhone weekly widgets report only confirmed budget crossings. Never label a
