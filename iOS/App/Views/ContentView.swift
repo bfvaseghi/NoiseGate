@@ -76,7 +76,7 @@ struct ContentView: View {
     }
 }
 
-/// Floating capsule tab bar with a sliding alarm-red pill.
+/// Floating capsule tab bar with a sliding ink pill.
 struct NGTabBar: View {
     @Binding var selection: NGTab
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -100,11 +100,14 @@ struct NGTabBar: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .foregroundStyle(selection == tab ? .white : NG.inkSoft)
+                    .foregroundStyle(selection == tab ? NG.paper : NG.inkSoft)
                     .background {
                         if selection == tab {
+                            // Ink, not alarm: red carries one meaning in this
+                            // app — a budget reached — and a permanently red
+                            // tab would drain it of that meaning.
                             Capsule()
-                                .fill(NG.alarm)
+                                .fill(NG.ink)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }

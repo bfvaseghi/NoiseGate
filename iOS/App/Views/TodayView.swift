@@ -97,7 +97,8 @@ struct TodayView: View {
 
     private var reportHeight: CGFloat {
         switch range {
-        case .today: return 168
+        // Today now carries a ring, the pickup stats, and up to four app rows.
+        case .today: return 216
         case .week: return 214
         case .rhythm: return 186
         }
@@ -228,7 +229,7 @@ struct RangePicker: View {
                     Text(range.rawValue.uppercased())
                         .font(.ngLabel(11))
                         .tracking(1.5)
-                        .foregroundStyle(selection == range ? .white : NG.inkSoft)
+                        .foregroundStyle(selection == range ? NG.paper : NG.inkSoft)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background {
