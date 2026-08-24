@@ -223,6 +223,12 @@ by seven, not only by days that had usage.
 
 The Rhythm scenes are the only ones given an `.hourly()` segment filter; every
 other range uses `.daily()`, which is far cheaper for Screen Time to compute.
+
+Today and 7 Days both read `numberOfPickups` alongside the duration. A total
+answers "how long" and stops; pickups and the mean visit length say whether
+that total arrived as one sitting or as repeated checking, which is the
+observation worth surfacing. Keep both — and keep them descriptive. Reporting
+that a number is high is the product; suggesting what to do about it is not.
 Rhythm buckets by hour of day and divides by the number of *distinct days
 observed*, so a single late night cannot read as a daily habit.
 

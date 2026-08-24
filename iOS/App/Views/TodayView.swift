@@ -99,7 +99,8 @@ struct TodayView: View {
         switch range {
         // Today now carries a ring, the pickup stats, and up to four app rows.
         case .today: return 216
-        case .week: return 214
+        // 7 Days carries the chart plus the per-app ranking.
+        case .week: return 296
         case .rhythm: return 186
         }
     }

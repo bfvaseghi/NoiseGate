@@ -325,6 +325,10 @@ struct WeekSummary {
     /// Exactly seven entries, oldest first, including zero-usage days.
     var days: [WeekDay] = []
     var totalMinutes = 0
+    var totalPickups = 0
+    /// Which apps the week actually went to, largest first. A daily total
+    /// says the week was heavy; this says what made it heavy.
+    var topApps: [ActivitySummary.AppUsage] = []
 
     var hasUsage: Bool { totalMinutes > 0 }
 
@@ -345,11 +349,21 @@ private func summarizeWeek(
 ) async -> WeekSummary {
     // Segments arrive per device per day; merge across devices by day.
     var byDay: [Date: TimeInterval] = [:]
+    var perApp: [ApplicationToken: (duration: TimeInterval, pickups: Int)] = [:]
     let calendar = Calendar.current
     for await deviceData in data {
         for await segment in deviceData.activitySegments {
             let day = calendar.startOfDay(for: segment.dateInterval.start)
             byDay[day, default: 0] += segment.totalActivityDuration
+            for await category in segment.categories {
+                for await app in category.applications {
+                    guard let token = app.application.token else { continue }
+                    var entry = perApp[token] ?? (0, 0)
+                    entry.duration += app.totalActivityDuration
+                    entry.pickups += app.numberOfPickups
+                    perApp[token] = entry
+                }
+            }
         }
     }
     let today = calendar.startOfDay(for: .now)
@@ -383,6 +397,17 @@ private func summarizeWeek(
         )
     }
     summary.totalMinutes = summary.days.reduce(0) { $0 + $1.minutes }
+    summary.totalPickups = perApp.values.reduce(0) { $0 + $1.pickups }
+    summary.topApps = perApp
+        .sorted { $0.value.duration > $1.value.duration }
+        .prefix(4)
+        .map {
+            ActivitySummary.AppUsage(
+                token: $0.key,
+                duration: $0.value.duration,
+                pickups: $0.value.pickups
+            )
+        }
     return summary
 }
 
@@ -424,10 +449,18 @@ struct WeekActivityView: View {
                 Text(summary.totalMinutes.asHoursMinutes)
                     .font(.ngNumber(34))
                     .foregroundStyle(NG.ink)
-                Text("TOTAL · AVG \(dailyAverage.asHoursMinutes)/DAY")
-                    .font(.ngLabel(10))
-                    .tracking(1.5)
-                    .foregroundStyle(NG.inkSoft)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("TOTAL · AVG \(dailyAverage.asHoursMinutes)/DAY")
+                        .font(.ngLabel(10))
+                        .tracking(1.5)
+                        .foregroundStyle(NG.inkSoft)
+                    if summary.totalPickups > 0 {
+                        Text("\(summary.totalPickups) PICKUPS")
+                            .font(.ngLabel(10))
+                            .tracking(1.5)
+                            .foregroundStyle(NG.inkSoft)
+                    }
+                }
                 Spacer()
             }
 
@@ -473,7 +506,22 @@ struct WeekActivityView: View {
                         }
                     }
                 }
-                .frame(height: 140)
+                .frame(height: 118)
+
+                if !summary.topApps.isEmpty {
+                    Divider()
+                    VStack(spacing: 6) {
+                        ForEach(summary.topApps) { app in
+                            AppRow(
+                                app: app,
+                                share: summary.totalMinutes > 0
+                                    ? app.duration / (Double(summary.totalMinutes) * 60)
+                                    : 0,
+                                tint: tint
+                            )
+                        }
+                    }
+                }
             }
         }
         .padding(.vertical, 6)
