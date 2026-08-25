@@ -6,6 +6,7 @@ import SwiftUI
 /// NoiseGate removes from the user's Screen Time picture.
 struct NoiseView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showDistractionPicker = false
     @State private var showMessagesPicker = false
     @State private var distractionBeforePicker: FamilyActivitySelection?
@@ -34,8 +35,8 @@ struct NoiseView: View {
                         distractionBeforePicker = model.distractionSelection
                         showDistractionPicker = true
                     },
-                    setApp: model.setDistractionApp,
-                    setWebDomain: model.setDistractionWebDomain
+                    setApp: { model.setDistractionApp($0, tracked: $1, for: $2) },
+                    setWebDomain: { model.setDistractionWebDomain($0, tracked: $1, for: $2) }
                 )
 
                 TrackListCard(
@@ -50,14 +51,13 @@ struct NoiseView: View {
                         messagesBeforePicker = model.messagesSelection
                         showMessagesPicker = true
                     },
-                    setApp: model.setMessagesApp,
-                    setWebDomain: { _, _ in }
+                    setApp: { model.setMessagesApp($0, tracked: $1, for: $2) },
+                    setWebDomain: { _, _, _ in }
                 )
 
                 Spacer(minLength: 96)
             }
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
+            .ngReadingWidth(sizeClass)
             .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
@@ -97,11 +97,26 @@ struct TrackListCard: View {
     let footnote: String
     let actionTitle: String
     let addApps: () -> Void
-    let setApp: (ApplicationToken, Bool) -> Void
-    let setWebDomain: (WebDomainToken, Bool) -> Void
+    let setApp: (ApplicationToken, Bool, PausedTokens.Duration) -> Void
+    let setWebDomain: (WebDomainToken, Bool, PausedTokens.Duration) -> Void
+
+    /// A pause that is waiting for a duration choice. Turning a row off asks
+    /// how long, so "just for today" cannot quietly become permanent.
+    @State private var pending: PendingPause?
+
+    private struct PendingPause {
+        let apply: (PausedTokens.Duration) -> Void
+    }
 
     private var pausedCount: Int {
         paused.applications.count + paused.webDomains.count
+    }
+
+    /// "Paused until tomorrow" is worth saying; an indefinite pause is
+    /// already obvious from the switch.
+    private func pauseNote(_ end: Date?) -> String? {
+        guard let end else { return nil }
+        return "Paused until \(end.formatted(.dateTime.weekday(.abbreviated).hour().minute()))"
     }
 
     var body: some View {
@@ -135,11 +150,19 @@ struct TrackListCard: View {
                 VStack(spacing: 2) {
                     ForEach(Array(selection.applicationTokens), id: \.self) { token in
                         let isExcluded = excludedApps.contains(token)
+                        let isPaused = paused.applications.contains(token)
                         toggleRow(
-                            isOn: !paused.applications.contains(token) && !isExcluded,
+                            isOn: !isPaused && !isExcluded,
                             enabled: !isExcluded,
-                            note: isExcluded ? "Reserved for Messages" : nil,
-                            set: { setApp(token, $0) }
+                            note: isExcluded
+                                ? "Reserved for Messages"
+                                : (isPaused ? pauseNote(paused.expiry(forApplication: token)) : nil),
+                            set: { tracked in
+                                if tracked { setApp(token, true, .indefinitely) }
+                                else {
+                                    pending = PendingPause { setApp(token, false, $0) }
+                                }
+                            }
                         ) {
                             Label(token)
                         }
@@ -149,7 +172,12 @@ struct TrackListCard: View {
                             isOn: !paused.webDomains.contains(token),
                             enabled: true,
                             note: nil,
-                            set: { setWebDomain(token, $0) }
+                            set: { tracked in
+                                if tracked { setWebDomain(token, true, .indefinitely) }
+                                else {
+                                    pending = PendingPause { setWebDomain(token, false, $0) }
+                                }
+                            }
                         ) {
                             Label(token)
                         }
@@ -163,6 +191,24 @@ struct TrackListCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .ngCard()
+        .confirmationDialog(
+            "Stop counting this for how long?",
+            isPresented: Binding(
+                get: { pending != nil },
+                set: { if !$0 { pending = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            ForEach(PausedTokens.Duration.allCases) { duration in
+                Button(duration.title) {
+                    pending?.apply(duration)
+                    pending = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pending = nil }
+        } message: {
+            Text("It stays in your list either way. Paused time is not counted and not blocked.")
+        }
     }
 
     private func toggleRow<L: View>(

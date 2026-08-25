@@ -6,8 +6,8 @@ struct MenuView: View {
     @EnvironmentObject private var model: MacModel
 
     private var distractionOver: Bool {
-        model.distractionMinutesToday > model.config.distractionBudgetMinutes
-            && model.config.distractionBudgetMinutes > 0
+        model.distractionMinutesToday > model.todayDistractionBudget
+            && model.todayDistractionBudget > 0
     }
 
     var body: some View {
@@ -26,7 +26,7 @@ struct MenuView: View {
                 BudgetGauge(
                     title: "Distractions",
                     minutes: model.distractionMinutesToday,
-                    budgetMinutes: model.config.distractionBudgetMinutes,
+                    budgetMinutes: model.todayDistractionBudget,
                     tint: NG.distraction,
                     isConfigured: !model.distractionBundleIDs.isEmpty,
                     size: 96
@@ -44,7 +44,7 @@ struct MenuView: View {
 
             if distractionOver {
                 Label {
-                    Text("Distractions are \((model.distractionMinutesToday - model.config.distractionBudgetMinutes).asHoursMinutes) over budget today. Resets at midnight.")
+                    Text("Distractions are \((model.distractionMinutesToday - model.todayDistractionBudget).asHoursMinutes) over budget today. Resets at midnight.")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundStyle(NG.inkSoft)
                 } icon: {

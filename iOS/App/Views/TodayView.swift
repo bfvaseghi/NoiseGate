@@ -11,12 +11,16 @@ extension DeviceActivityReport.Context {
     static let messagesWeek = Self("Messages Week")
     static let distractionsRhythm = Self("Distractions Rhythm")
     static let messagesRhythm = Self("Messages Rhythm")
+    static let distractionsMonth = Self("Distractions Month")
+    static let messagesMonth = Self("Messages Month")
+    static let distractionsMovers = Self("Distractions Movers")
     static let combined = Self("Combined")
 }
 
 enum StatsRange: String, CaseIterable, Identifiable {
     case today = "Today"
     case week = "7 Days"
+    case month = "30 Days"
     case rhythm = "Rhythm"
     var id: String { rawValue }
 
@@ -24,7 +28,18 @@ enum StatsRange: String, CaseIterable, Identifiable {
         switch self {
         case .today: return "TODAY."
         case .week: return "7 DAYS."
+        case .month: return "30 DAYS."
         case .rhythm: return "RHYTHM."
+        }
+    }
+
+    /// How many days of history this range covers. 30 is `HistoryStore.maxDays`
+    /// — all the history there is, so no range may claim more.
+    var dayCount: Int {
+        switch self {
+        case .today: return 1
+        case .week, .rhythm: return 7
+        case .month: return HistoryStore.maxDays
         }
     }
 
@@ -33,6 +48,7 @@ enum StatsRange: String, CaseIterable, Identifiable {
         switch self {
         case .today: return distractions ? .distractions : .messages
         case .week: return distractions ? .distractionsWeek : .messagesWeek
+        case .month: return distractions ? .distractionsMonth : .messagesMonth
         case .rhythm: return distractions ? .distractionsRhythm : .messagesRhythm
         }
     }
@@ -43,6 +59,7 @@ enum StatsRange: String, CaseIterable, Identifiable {
 /// only the active Distractions and Messages tokens, for today or the last 7 days.
 struct TodayView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var snapshot = UsageSnapshot.loadToday()
     @State private var history: [DayRecord] = HistoryStore.lastDays(30)
     @State private var range: StatsRange = .today
@@ -54,13 +71,16 @@ struct TodayView: View {
             ?? DateInterval(start: .now, duration: 3600)
     }
 
-    private var weekInterval: DateInterval {
+    private var weekInterval: DateInterval { interval(days: 7) }
+    private var rangeInterval: DateInterval { interval(days: range.dayCount) }
+
+    /// A stable day-boundary interval prevents the report extension from
+    /// re-querying just because SwiftUI evaluated this view a moment later.
+    private func interval(days: Int) -> DateInterval {
         let calendar = Calendar.current
         let start = calendar.startOfDay(
-            for: calendar.date(byAdding: .day, value: -6, to: .now) ?? .now
+            for: calendar.date(byAdding: .day, value: -(days - 1), to: .now) ?? .now
         )
-        // A stable day-boundary interval prevents the report extension from
-        // re-querying just because SwiftUI evaluated this view a moment later.
         return DateInterval(start: start, end: todayInterval.end)
     }
 
@@ -72,7 +92,7 @@ struct TodayView: View {
         // daily totals, which is far cheaper for Screen Time to compute.
         let segment: DeviceActivityFilter.SegmentInterval = range == .rhythm
             ? .hourly(during: weekInterval)
-            : .daily(during: range == .today ? todayInterval : weekInterval)
+            : .daily(during: range == .today ? todayInterval : rangeInterval)
         return DeviceActivityFilter(
             segment: segment,
             users: .all,
@@ -102,15 +122,17 @@ struct TodayView: View {
         case .today: return 216
         // 7 Days carries the chart plus the per-app ranking.
         case .week: return 296
+        // 30 Days drops the weekday labels but keeps the ranking.
+        case .month: return 296
         case .rhythm: return 186
         }
     }
 
     private var headerDetail: String {
-        let span = "\(weekInterval.start.formatted(.dateTime.day().month())) – \(Date.now.formatted(.dateTime.day().month()))"
+        let span = "\(rangeInterval.start.formatted(.dateTime.day().month())) – \(Date.now.formatted(.dateTime.day().month()))"
         switch range {
         case .today: return Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide))
-        case .week: return span
+        case .week, .month: return span
         case .rhythm: return "Hour of day · \(span)"
         }
     }
@@ -137,7 +159,7 @@ struct TodayView: View {
 
                 if range == .today, distractionsActive || messagesActive {
                     CombinedCard(
-                        budgetMinutes: model.config.distractionBudgetMinutes
+                        budgetMinutes: model.config.distractionBudget(on: .now)
                             + model.config.messagesBudgetMinutes
                     ) {
                         DeviceActivityReport(
@@ -156,50 +178,69 @@ struct TodayView: View {
                     }
                 }
 
-                UsageCard(
-                    chip: "Distractions", tint: NG.distraction,
-                    budgetLabel: budgetLabel(model.config.distractionBudgetMinutes)
-                ) {
-                    if !distractionsActive {
-                        MissingSelectionRow(text: model.distractionSelection.isEmpty
-                            ? "Add distracting apps in the Apps tab."
-                            : "All distracting apps are paused or counted in Messages.")
-                    } else {
-                        DeviceActivityReport(
-                            range.context(distractions: true),
-                            filter: filter(
-                                apps: model.activeDistractionApps,
-                                webDomains: model.activeDistractionWebDomains
+                AdaptiveCards {
+                    UsageCard(
+                        chip: "Distractions", tint: NG.distraction,
+                        budgetLabel: budgetLabel(model.config.distractionBudget(on: .now))
+                    ) {
+                        if !distractionsActive {
+                            MissingSelectionRow(text: model.distractionSelection.isEmpty
+                                ? "Add distracting apps in the Apps tab."
+                                : "All distracting apps are paused or counted in Messages.")
+                        } else {
+                            DeviceActivityReport(
+                                range.context(distractions: true),
+                                filter: filter(
+                                    apps: model.activeDistractionApps,
+                                    webDomains: model.activeDistractionWebDomains
+                                )
                             )
-                        )
-                        .frame(height: reportHeight)
-                        .id("distractions-\(range.rawValue)")
+                            .frame(height: reportHeight)
+                            .id("distractions-\(range.rawValue)")
+                        }
                     }
-                }
 
-                UsageCard(
-                    chip: "Messages", tint: NG.msg,
-                    budgetLabel: budgetLabel(model.config.messagesBudgetMinutes)
-                ) {
-                    if !messagesActive {
-                        MissingSelectionRow(text: model.messagesSelection.isEmpty
-                            ? "Add the Messages app in the Apps tab."
-                            : "Messages tracking is currently paused.")
-                    } else {
-                        DeviceActivityReport(
-                            range.context(distractions: false),
-                            filter: filter(
-                                apps: model.activeMessagesApps,
-                                webDomains: []
+                    UsageCard(
+                        chip: "Messages", tint: NG.msg,
+                        budgetLabel: budgetLabel(model.config.messagesBudgetMinutes)
+                    ) {
+                        if !messagesActive {
+                            MissingSelectionRow(text: model.messagesSelection.isEmpty
+                                ? "Add the Messages app in the Apps tab."
+                                : "Messages tracking is currently paused.")
+                        } else {
+                            DeviceActivityReport(
+                                range.context(distractions: false),
+                                filter: filter(
+                                    apps: model.activeMessagesApps,
+                                    webDomains: []
+                                )
                             )
-                        )
-                        .frame(height: reportHeight)
-                        .id("messages-\(range.rawValue)")
+                            .frame(height: reportHeight)
+                            .id("messages-\(range.rawValue)")
+                        }
                     }
-                }
 
-                if range == .today {
-                    StreakCard(records: history, snapshot: snapshot)
+                    if range == .month, distractionsActive {
+                        UsageCard(
+                            chip: "Movers", tint: NG.ink, chipForeground: NG.paper,
+                            budgetLabel: "LAST 7 VS PRIOR \(HistoryStore.maxDays - 7)"
+                        ) {
+                            DeviceActivityReport(
+                                .distractionsMovers,
+                                filter: filter(
+                                    apps: model.activeDistractionApps,
+                                    webDomains: model.activeDistractionWebDomains
+                                )
+                            )
+                            .frame(height: 178)
+                            .id("movers-distractions")
+                        }
+                    }
+
+                    if range == .today {
+                        StreakCard(records: history, snapshot: snapshot)
+                    }
                 }
 
                 Text("Only Distractions and Messages are counted. Everything else is excluded as noise. Nothing is blocked.")
@@ -209,8 +250,7 @@ struct TodayView: View {
                     .padding(.horizontal, 24)
                     .padding(.bottom, 96) // room for the floating tab bar
             }
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
+            .ngReadingWidth(sizeClass)
             .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
@@ -251,7 +291,11 @@ struct RangePicker: View {
                 } label: {
                     Text(range.rawValue.uppercased())
                         .font(.ngLabel(11))
-                        .tracking(1.5)
+                        .tracking(1.2)
+                        // Four ranges have to fit the narrowest phone, and
+                        // "30 DAYS" is the longest label.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .foregroundStyle(selection == range ? NG.paper : NG.inkSoft)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
@@ -303,13 +347,15 @@ struct CombinedCard<Content: View>: View {
 struct UsageCard<Content: View>: View {
     let chip: String
     let tint: Color
+    /// See `NGChip.foreground` — an ink-tinted chip needs paper on top.
+    var chipForeground: Color = .white
     let budgetLabel: String
     @ViewBuilder let content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                NGChip(text: chip, tint: tint)
+                NGChip(text: chip, tint: tint, foreground: chipForeground)
                 Spacer()
                 Text(budgetLabel)
                     .font(.ngLabel(10))

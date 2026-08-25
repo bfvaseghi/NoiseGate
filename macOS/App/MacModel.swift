@@ -23,7 +23,7 @@ struct MacLedger: Codable {
         self.dayKey = dayKey
         distractionSecondsByBundleID = [:]
         messagesSecondsByBundleID = [:]
-        distractionBudgetMinutes = config.distractionBudgetMinutes
+        distractionBudgetMinutes = config.distractionBudget(on: .now)
         messagesBudgetMinutes = config.messagesBudgetMinutes
     }
 
@@ -133,6 +133,11 @@ final class MacModel: NSObject, ObservableObject {
     /// redraw every five seconds.
     @Published private(set) var distractionMinutesToday = 0
     @Published private(set) var messagesMinutesToday = 0
+
+    /// The Distractions target for today, which is the weekend one on a
+    /// weekend. Views must read this rather than `config.distractionBudgetMinutes`,
+    /// which is the weekday setting.
+    var todayDistractionBudget: Int { config.distractionBudget(on: .now) }
     @Published private(set) var installedApps: [DiscoveredApp] = []
     @Published private(set) var isUserIdle = false
     @Published private(set) var isSessionActive = true
@@ -274,7 +279,7 @@ final class MacModel: NSObject, ObservableObject {
     func adjustBudget(_ keyPath: WritableKeyPath<BudgetConfig, Int>, by delta: Int) {
         checkpoint()
         config[keyPath: keyPath] = min(480, max(5, config[keyPath: keyPath] + delta))
-        ledger.distractionBudgetMinutes = config.distractionBudgetMinutes
+        ledger.distractionBudgetMinutes = config.distractionBudget(on: .now)
         ledger.messagesBudgetMinutes = config.messagesBudgetMinutes
         saveConfigAndPublish()
         checkNudges()
@@ -513,7 +518,7 @@ final class MacModel: NSObject, ObservableObject {
         nudgeIfCrossed(
             kind: "distractions",
             seconds: distractionSecondsToday,
-            budget: config.distractionBudgetMinutes
+            budget: config.distractionBudget(on: .now)
         )
         nudgeIfCrossed(
             kind: "msg",
@@ -620,7 +625,7 @@ final class MacModel: NSObject, ObservableObject {
             dayKey: ledger.dayKey,
             distractionMinutes: distractionMinutesToday,
             messagesMinutes: messagesMinutesToday,
-            distractionBudgetMinutes: config.distractionBudgetMinutes,
+            distractionBudgetMinutes: config.distractionBudget(on: .now),
             messagesBudgetMinutes: config.messagesBudgetMinutes,
             distractionsConfigured: !distractionBundleIDs.isEmpty,
             messagesConfigured: !messagesBundleIDs.isEmpty,

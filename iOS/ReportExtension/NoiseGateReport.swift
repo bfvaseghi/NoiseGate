@@ -23,6 +23,15 @@ struct NoiseGateReportExtension: DeviceActivityReportExtension {
         MessagesWeekReport { summary in
             WeekActivityView(summary: summary, kind: .messages)
         }
+        DistractionsMonthReport { summary in
+            WeekActivityView(summary: summary, kind: .distractions)
+        }
+        MessagesMonthReport { summary in
+            WeekActivityView(summary: summary, kind: .messages)
+        }
+        DistractionsMoversReport { summary in
+            MoversView(summary: summary, kind: .distractions)
+        }
         DistractionsRhythmReport { summary in
             RhythmView(summary: summary, kind: .distractions)
         }
@@ -73,6 +82,9 @@ extension DeviceActivityReport.Context {
     static let messagesWeek = Self("Messages Week")
     static let distractionsRhythm = Self("Distractions Rhythm")
     static let messagesRhythm = Self("Messages Rhythm")
+    static let distractionsMonth = Self("Distractions Month")
+    static let messagesMonth = Self("Messages Month")
+    static let distractionsMovers = Self("Distractions Movers")
     static let combined = Self("Combined")
 }
 
@@ -145,7 +157,7 @@ struct ActivityView: View {
     private var budgetMinutes: Int {
         let config = BudgetConfig.load()
         return kind == .distractions
-            ? config.distractionBudgetMinutes : config.messagesBudgetMinutes
+            ? config.distractionBudget(on: .now) : config.messagesBudgetMinutes
     }
 
     private var minutes: Int { summary.minutes }
@@ -323,6 +335,199 @@ private struct AppRow: View {
     }
 }
 
+// MARK: - Movers (what changed against its own baseline)
+
+/// A budget is a number the owner picked, so meeting it proves nothing. This
+/// compares the last seven days against the twenty-three before them, per app,
+/// which is the one reading the owner did not choose in advance.
+///
+/// It has to live in the report extension: per-app exact usage is precisely
+/// what Apple keeps inside this sandbox, so the comparison cannot be computed
+/// anywhere the host could read it.
+struct MoversSummary {
+    struct Mover: Identifiable {
+        let token: ApplicationToken
+        /// Mean minutes per day across the recent window.
+        let recentMinutesPerDay: Double
+        /// Mean minutes per day across the days before it.
+        let baselineMinutesPerDay: Double
+        var id: ApplicationToken { token }
+
+        var deltaMinutesPerDay: Double { recentMinutesPerDay - baselineMinutesPerDay }
+
+        /// Nil when the baseline is too small for a percentage to mean
+        /// anything — going from 20 seconds to a minute is not "+200%".
+        var percentChange: Int? {
+            guard baselineMinutesPerDay >= 1 else { return nil }
+            let change = (recentMinutesPerDay - baselineMinutesPerDay)
+                / baselineMinutesPerDay * 100
+            return Int(change.rounded())
+        }
+    }
+
+    var movers: [Mover] = []
+    var recentDays = 7
+    var baselineDays = HistoryStore.maxDays - 7
+    /// False until there is any usage before the recent window to compare to.
+    var hasBaseline = false
+}
+
+private func summarizeMovers(
+    _ data: DeviceActivityResults<DeviceActivityData>,
+    recentDays: Int = 7,
+    windowDays: Int = HistoryStore.maxDays
+) async -> MoversSummary {
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: .now)
+    let recentStart = calendar.date(
+        byAdding: .day,
+        value: -(recentDays - 1),
+        to: today
+    ) ?? today
+
+    var recent: [ApplicationToken: TimeInterval] = [:]
+    var baseline: [ApplicationToken: TimeInterval] = [:]
+    for await deviceData in data {
+        for await segment in deviceData.activitySegments {
+            let day = calendar.startOfDay(for: segment.dateInterval.start)
+            for await category in segment.categories {
+                for await app in category.applications {
+                    guard let token = app.application.token else { continue }
+                    if day >= recentStart {
+                        recent[token, default: 0] += app.totalActivityDuration
+                    } else {
+                        baseline[token, default: 0] += app.totalActivityDuration
+                    }
+                }
+            }
+        }
+    }
+
+    var summary = MoversSummary()
+    summary.recentDays = recentDays
+    summary.baselineDays = max(1, windowDays - recentDays)
+    summary.hasBaseline = baseline.values.contains { $0 > 0 }
+
+    let tokens = Set(recent.keys).union(baseline.keys)
+    summary.movers = tokens
+        .map { token in
+            MoversSummary.Mover(
+                token: token,
+                recentMinutesPerDay: recent[token, default: 0] / 60
+                    / Double(max(1, recentDays)),
+                baselineMinutesPerDay: baseline[token, default: 0] / 60
+                    / Double(summary.baselineDays)
+            )
+        }
+        // Rank by how much the daily habit moved, in either direction. A
+        // minute a day either way is noise, not a finding.
+        .filter { abs($0.deltaMinutesPerDay) >= 1 }
+        .sorted { abs($0.deltaMinutesPerDay) > abs($1.deltaMinutesPerDay) }
+        .prefix(6)
+        .map { $0 }
+    return summary
+}
+
+struct DistractionsMoversReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .distractionsMovers
+    let content: (MoversSummary) -> MoversView
+
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> MoversSummary {
+        await summarizeMovers(data)
+    }
+}
+
+struct MoversView: View {
+    let summary: MoversSummary
+    let kind: ReportKind
+
+    private var widest: Double {
+        max(1, summary.movers.map { abs($0.deltaMinutesPerDay) }.max() ?? 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if summary.movers.isEmpty {
+                Text(summary.hasBaseline
+                        ? "Nothing moved by more than a minute a day."
+                        : "Not enough history yet to compare against.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(NG.inkSoft)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(summary.movers) { mover in
+                    MoverRow(mover: mover, widest: widest)
+                }
+                Text("Minutes per day over the last \(summary.recentDays) days against the \(summary.baselineDays) before them.")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(NG.inkSoft)
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct MoverRow: View {
+    let mover: MoversSummary.Mover
+    let widest: Double
+
+    private var isUp: Bool { mover.deltaMinutesPerDay > 0 }
+    /// Up is the alarm colour and down is the Messages teal, matching how
+    /// every other over/under reading in the app is coloured.
+    private var tint: Color { isUp ? NG.alarm : NG.msg }
+    private var share: Double { min(1, abs(mover.deltaMinutesPerDay) / widest) }
+
+    private var change: String {
+        if let percent = mover.percentChange {
+            return "\(percent > 0 ? "+" : "")\(percent)%"
+        }
+        let delta = Int(mover.deltaMinutesPerDay.rounded())
+        return "\(delta > 0 ? "+" : "")\(delta)m"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label(mover.token)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(NG.ink)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+
+            // A diverging bar around a fixed centre, so "up" and "down" read
+            // as directions rather than two unrelated lengths.
+            ZStack {
+                Capsule()
+                    .fill(NG.line.opacity(0.7))
+                    .frame(width: 64, height: 5)
+                Rectangle()
+                    .fill(NG.inkSoft.opacity(0.5))
+                    .frame(width: 1, height: 7)
+                Capsule()
+                    .fill(tint)
+                    .frame(width: max(3, 32 * share), height: 5)
+                    .offset(x: isUp ? max(3, 32 * share) / 2 : -max(3, 32 * share) / 2)
+            }
+            .frame(width: 64, height: 7)
+            .accessibilityHidden(true)
+
+            Text(change)
+                .font(.ngNumber(12.5))
+                .foregroundStyle(tint)
+                .frame(width: 48, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(
+            isUp
+                ? "up \(change), now \(Int(mover.recentMinutesPerDay.rounded())) minutes a day"
+                : "down \(change), now \(Int(mover.recentMinutesPerDay.rounded())) minutes a day"
+        )
+    }
+}
+
 // MARK: - Combined (both totals as one number)
 
 struct CombinedReport: DeviceActivityReportScene {
@@ -344,7 +549,7 @@ struct CombinedView: View {
 
     private var combinedBudget: Int {
         let config = BudgetConfig.load()
-        return config.distractionBudgetMinutes + config.messagesBudgetMinutes
+        return config.distractionBudget(on: .now) + config.messagesBudgetMinutes
     }
 
     private var reached: Bool {
@@ -404,7 +609,8 @@ struct CombinedView: View {
 // MARK: - Week view (exact 7-day chart, rendered inside the privacy sandbox)
 
 struct WeekSummary {
-    /// Exactly seven entries, oldest first, including zero-usage days.
+    /// One entry per day in the window, oldest first, including zero-usage
+    /// days. Seven for the week scene, thirty for the month scene.
     var days: [WeekDay] = []
     var totalMinutes = 0
     var totalPickups = 0
@@ -427,7 +633,8 @@ struct WeekSummary {
 
 private func summarizeWeek(
     _ data: DeviceActivityResults<DeviceActivityData>,
-    kind: ReportKind
+    kind: ReportKind,
+    days dayCount: Int = 7
 ) async -> WeekSummary {
     // Segments arrive per device per day; merge across devices by day.
     var byDay: [Date: TimeInterval] = [:]
@@ -455,8 +662,8 @@ private func summarizeWeek(
     for record in HistoryStore.load() {
         history[record.dayKey] = record
     }
-    let days = (0..<7).compactMap { offset in
-        calendar.date(byAdding: .day, value: offset - 6, to: today)
+    let days = (0..<dayCount).compactMap { offset in
+        calendar.date(byAdding: .day, value: offset - (dayCount - 1), to: today)
     }
     var summary = WeekSummary()
     summary.days = days.map { date in
@@ -465,7 +672,7 @@ private func summarizeWeek(
         let budget: Int?
         if key == todayKey {
             budget = kind == .distractions
-                ? currentConfig.distractionBudgetMinutes
+                ? currentConfig.distractionBudget(on: date)
                 : currentConfig.messagesBudgetMinutes
         } else if kind == .distractions {
             budget = stored?.distractionBudgetMinutes
@@ -515,15 +722,42 @@ struct MessagesWeekReport: DeviceActivityReportScene {
     }
 }
 
+/// Thirty days is the whole history `HistoryStore` retains, so this is the
+/// longest honest window the app can offer.
+struct DistractionsMonthReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .distractionsMonth
+    let content: (WeekSummary) -> WeekActivityView
+
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> WeekSummary {
+        await summarizeWeek(data, kind: .distractions, days: HistoryStore.maxDays)
+    }
+}
+
+struct MessagesMonthReport: DeviceActivityReportScene {
+    let context: DeviceActivityReport.Context = .messagesMonth
+    let content: (WeekSummary) -> WeekActivityView
+
+    func makeConfiguration(
+        representing data: DeviceActivityResults<DeviceActivityData>
+    ) async -> WeekSummary {
+        await summarizeWeek(data, kind: .messages, days: HistoryStore.maxDays)
+    }
+}
+
 struct WeekActivityView: View {
     let summary: WeekSummary
     let kind: ReportKind
 
     private var tint: Color { kind == .distractions ? NG.distraction : NG.msg }
 
-    private var dailyAverage: Int {
-        summary.totalMinutes / 7
-    }
+    private var dayCount: Int { max(1, summary.days.count) }
+    private var dailyAverage: Int { summary.totalMinutes / dayCount }
+
+    /// Thirty narrow weekday initials would be unreadable, so a longer
+    /// window labels weeks instead of days.
+    private var isLongWindow: Bool { dayCount > 10 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -547,7 +781,7 @@ struct WeekActivityView: View {
             }
 
             if !summary.hasUsage {
-                Text("No usage recorded in the last 7 days.")
+                Text("No usage recorded in the last \(dayCount) days.")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(NG.inkSoft)
             } else {
@@ -560,7 +794,7 @@ struct WeekActivityView: View {
                         .foregroundStyle(
                             day.reachedBudget ? NG.alarm : tint
                         )
-                        .cornerRadius(4)
+                        .cornerRadius(isLongWindow ? 2 : 4)
                     }
                     ForEach(summary.days) { day in
                         if let budget = day.budgetMinutes {
@@ -574,8 +808,14 @@ struct WeekActivityView: View {
                     }
                 }
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .day)) { _ in
-                        AxisValueLabel(format: .dateTime.weekday(.narrow))
+                    if isLongWindow {
+                        AxisMarks(values: .stride(by: .weekOfYear)) { _ in
+                            AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                        }
+                    } else {
+                        AxisMarks(values: .stride(by: .day)) { _ in
+                            AxisValueLabel(format: .dateTime.weekday(.narrow))
+                        }
                     }
                 }
                 .chartYAxis {

@@ -659,4 +659,200 @@ final class SharedModelTests: XCTestCase {
             midnight
         )
     }
+
+    // MARK: - Weekend budgets
+
+    /// A config written before weekend budgets existed must keep its numbers
+    /// and behave exactly as it did: one target, every day.
+    func testConfigWithoutWeekendKeysStaysSingleBudget() throws {
+        let data = Data(#"""
+        {
+          "distractionBudgetMinutes": 45,
+          "messagesBudgetMinutes": 60
+        }
+        """#.utf8)
+
+        let value = try JSONDecoder().decode(BudgetConfig.self, from: data)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+
+        XCTAssertFalse(value.weekendBudgetsEnabled)
+        XCTAssertEqual(value.weekendDistractionBudgetMinutes, 75)
+        for day in 22...28 {
+            let date = try XCTUnwrap(
+                calendar.date(from: DateComponents(year: 2026, month: 8, day: day))
+            )
+            XCTAssertEqual(value.distractionBudget(on: date, calendar: calendar), 45)
+        }
+    }
+
+    func testWeekendBudgetAppliesOnlyToWeekendDays() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        var config = BudgetConfig()
+        config.distractionBudgetMinutes = 45
+        config.weekendDistractionBudgetMinutes = 75
+        config.weekendBudgetsEnabled = true
+
+        // 22 Aug 2026 is a Saturday, 23 Aug a Sunday, 24 Aug a Monday.
+        func budget(day: Int) throws -> Int {
+            let date = try XCTUnwrap(
+                calendar.date(from: DateComponents(year: 2026, month: 8, day: day))
+            )
+            return config.distractionBudget(on: date, calendar: calendar)
+        }
+        XCTAssertEqual(try budget(day: 21), 45, "Friday keeps the weekday target")
+        XCTAssertEqual(try budget(day: 22), 75, "Saturday takes the weekend target")
+        XCTAssertEqual(try budget(day: 23), 75, "Sunday takes the weekend target")
+        XCTAssertEqual(try budget(day: 24), 45, "Monday returns to the weekday target")
+
+        // Messages deliberately has no weekend variant.
+        let saturday = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 22))
+        )
+        XCTAssertEqual(config.budget(kind: "msg", on: saturday, calendar: calendar), 60)
+        XCTAssertEqual(config.budget(kind: "distractions", on: saturday, calendar: calendar), 75)
+    }
+
+    func testWeekendBudgetIsIgnoredWhileDisabled() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        var config = BudgetConfig()
+        config.distractionBudgetMinutes = 45
+        config.weekendDistractionBudgetMinutes = 200
+        config.weekendBudgetsEnabled = false
+
+        let saturday = try XCTUnwrap(
+            calendar.date(from: DateComponents(year: 2026, month: 8, day: 22))
+        )
+        XCTAssertEqual(config.distractionBudget(on: saturday, calendar: calendar), 45)
+    }
+
+    func testWeekendBudgetSurvivesEncodeDecodeAndClamps() throws {
+        var config = BudgetConfig()
+        config.weekendBudgetsEnabled = true
+        config.weekendDistractionBudgetMinutes = 900   // above the 480 ceiling
+        config.normalize()
+        XCTAssertEqual(config.weekendDistractionBudgetMinutes, 480)
+
+        let round = try JSONDecoder().decode(
+            BudgetConfig.self,
+            from: try JSONEncoder().encode(config)
+        )
+        XCTAssertTrue(round.weekendBudgetsEnabled)
+        XCTAssertEqual(round.weekendDistractionBudgetMinutes, 480)
+    }
+
+    // MARK: - Pauses that end on their own
+
+    func testPauseDurationsResolveToTheRightMoment() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = try XCTUnwrap(
+            calendar.date(from: DateComponents(
+                year: 2026, month: 8, day: 25, hour: 16, minute: 20
+            ))
+        )
+
+        // "Until tomorrow" means the next midnight, not 24 hours from now —
+        // a pause taken at 11pm should not still be running tomorrow evening.
+        XCTAssertEqual(
+            PausedTokens.Duration.today.end(from: now, calendar: calendar),
+            try XCTUnwrap(
+                calendar.date(from: DateComponents(year: 2026, month: 8, day: 26))
+            )
+        )
+        XCTAssertEqual(
+            PausedTokens.Duration.week.end(from: now, calendar: calendar),
+            try XCTUnwrap(
+                calendar.date(from: DateComponents(
+                    year: 2026, month: 9, day: 1, hour: 16, minute: 20
+                ))
+            )
+        )
+        XCTAssertNil(
+            PausedTokens.Duration.indefinitely.end(from: now, calendar: calendar),
+            "An indefinite pause must never grow an end date"
+        )
+    }
+
+    func testLegacyPausedTokensDecodeAsIndefinite() throws {
+        // v1 stored only the token sets. Those pauses must keep behaving the
+        // way they always did: they stay until the owner lifts them.
+        let data = Data(#"""
+        { "applications": [], "webDomains": [] }
+        """#.utf8)
+
+        var value = try JSONDecoder().decode(PausedTokens.self, from: data)
+        XCTAssertTrue(value.applicationExpiry.isEmpty)
+        XCTAssertTrue(value.webDomainExpiry.isEmpty)
+        XCTAssertFalse(
+            value.expire(now: .distantFuture),
+            "Nothing can expire when nothing carries an end date"
+        )
+    }
+
+    // MARK: - CSV export
+
+    private func record(
+        _ day: String,
+        distraction: Int,
+        messages: Int,
+        isFloor: Bool
+    ) -> DayRecord {
+        DayRecord(
+            dayKey: day,
+            distractionMinutes: distraction,
+            messagesMinutes: messages,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 60,
+            isFloor: isFloor
+        )
+    }
+
+    func testCSVMarksEveryRowAsExactOrAFloor() {
+        let csv = HistoryExport.csv([
+            record("2026-08-24", distraction: 52, messages: 37, isFloor: true),
+            record("2026-08-23", distraction: 31, messages: 12, isFloor: false),
+        ])
+        let lines = csv.split(separator: "\n", omittingEmptySubsequences: false)
+
+        XCTAssertEqual(String(lines[0]), HistoryExport.header)
+        // Oldest first, whatever order the caller passed them in.
+        XCTAssertEqual(lines[1], "2026-08-23,31,45,12,60,exact")
+        XCTAssertEqual(lines[2], "2026-08-24,52,45,37,60,at_least")
+        XCTAssertTrue(csv.hasSuffix("\n"), "A CSV should end with a newline")
+    }
+
+    func testCSVCarriesThePerDayBudgetsRatherThanTodays() {
+        // A weekend day judged against 75 must export 75, even though the
+        // weekday target is 45. This is the whole reason DayRecord stores its
+        // own budgets.
+        var weekend = record("2026-08-22", distraction: 80, messages: 20, isFloor: true)
+        weekend.distractionBudgetMinutes = 75
+        let csv = HistoryExport.csv([weekend])
+        XCTAssertTrue(
+            csv.contains("2026-08-22,80,75,20,60,at_least"),
+            "Expected the weekend budget in the row, got: \(csv)"
+        )
+    }
+
+    func testCSVDropsInvalidDaysAndDeduplicates() {
+        let csv = HistoryExport.csv([
+            record("not-a-day", distraction: 5, messages: 5, isFloor: true),
+            record("2026-08-24", distraction: 10, messages: 1, isFloor: true),
+            record("2026-08-24", distraction: 52, messages: 37, isFloor: true),
+        ])
+        let rows = csv
+            .split(separator: "\n")
+            .dropFirst()
+        XCTAssertEqual(rows.count, 1, "One valid day, deduplicated, got: \(csv)")
+        XCTAssertEqual(rows.first, "2026-08-24,52,45,37,60,at_least")
+    }
+
+    func testCSVFieldQuotingFollowsRFC4180() {
+        XCTAssertEqual(HistoryExport.field("plain"), "plain")
+        XCTAssertEqual(HistoryExport.field("with,comma"), "\"with,comma\"")
+        XCTAssertEqual(HistoryExport.field("say \"hi\""), "\"say \"\"hi\"\"\"")
+    }
 }

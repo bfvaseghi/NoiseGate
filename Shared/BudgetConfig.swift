@@ -7,6 +7,13 @@ struct BudgetConfig: Codable, Equatable {
     var distractionBudgetMinutes: Int = 45
     /// Daily budget for Messages, in minutes. Tracked separately.
     var messagesBudgetMinutes: Int = 60
+    /// Whether Saturday and Sunday carry their own Distractions target. One
+    /// daily number cannot serve both a working Tuesday and a free Saturday.
+    var weekendBudgetsEnabled: Bool = false
+    /// Distractions budget applied on weekend days when the above is on.
+    /// Messages deliberately keeps a single number: replying to people does
+    /// not have the same weekday/weekend asymmetry that scrolling does.
+    var weekendDistractionBudgetMinutes: Int = 75
     /// Master notification switch. Threshold tracking and widgets still work off.
     var notificationsEnabled: Bool = true
     /// Which budget milestones send a notification (subset of `nudgePercents`).
@@ -29,6 +36,8 @@ struct BudgetConfig: Codable, Equatable {
         case distractionBudgetMinutes
         case noiseBudgetMinutes // v1 migration
         case messagesBudgetMinutes
+        case weekendBudgetsEnabled
+        case weekendDistractionBudgetMinutes
         case notificationsEnabled
         case notifyAt
         case overtimeNotifications
@@ -44,6 +53,14 @@ struct BudgetConfig: Codable, Equatable {
             forKey: .distractionBudgetMinutes
         ) ?? c.decodeIfPresent(Int.self, forKey: .noiseBudgetMinutes) ?? 45
         messagesBudgetMinutes = try c.decodeIfPresent(Int.self, forKey: .messagesBudgetMinutes) ?? 60
+        weekendBudgetsEnabled = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .weekendBudgetsEnabled
+        ) ?? false
+        weekendDistractionBudgetMinutes = try c.decodeIfPresent(
+            Int.self,
+            forKey: .weekendDistractionBudgetMinutes
+        ) ?? 75
         notificationsEnabled = try c.decodeIfPresent(Bool.self, forKey: .notificationsEnabled) ?? true
         notifyAt = try c.decodeIfPresent(Set<Int>.self, forKey: .notifyAt) ?? [50, 80, 100]
         overtimeNotifications = try c.decodeIfPresent(Bool.self, forKey: .overtimeNotifications) ?? true
@@ -55,10 +72,34 @@ struct BudgetConfig: Codable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(distractionBudgetMinutes, forKey: .distractionBudgetMinutes)
         try c.encode(messagesBudgetMinutes, forKey: .messagesBudgetMinutes)
+        try c.encode(weekendBudgetsEnabled, forKey: .weekendBudgetsEnabled)
+        try c.encode(
+            weekendDistractionBudgetMinutes,
+            forKey: .weekendDistractionBudgetMinutes
+        )
         try c.encode(notificationsEnabled, forKey: .notificationsEnabled)
         try c.encode(notifyAt, forKey: .notifyAt)
         try c.encode(overtimeNotifications, forKey: .overtimeNotifications)
         try c.encode(showMinutesInMenuBar, forKey: .showMinutesInMenuBar)
+    }
+
+    /// The Distractions budget that applies on a given day. `isDateInWeekend`
+    /// follows the user's own calendar rather than hardcoding Saturday and
+    /// Sunday, so this stays correct outside a Mon-Fri working week.
+    func distractionBudget(on date: Date, calendar: Calendar = .current) -> Int {
+        guard weekendBudgetsEnabled, calendar.isDateInWeekend(date) else {
+            return distractionBudgetMinutes
+        }
+        return weekendDistractionBudgetMinutes
+    }
+
+    /// The budget a ledger is judged against on a given day. `kind` matches
+    /// the threshold-event vocabulary so callers can pass an event's kind
+    /// straight through.
+    func budget(kind: String, on date: Date, calendar: Calendar = .current) -> Int {
+        kind == "msg"
+            ? messagesBudgetMinutes
+            : distractionBudget(on: date, calendar: calendar)
     }
 
     /// Whether a given threshold percent should produce a notification.
@@ -85,6 +126,7 @@ struct BudgetConfig: Codable, Equatable {
     mutating func normalize() {
         distractionBudgetMinutes = min(480, max(5, distractionBudgetMinutes))
         messagesBudgetMinutes = min(480, max(5, messagesBudgetMinutes))
+        weekendDistractionBudgetMinutes = min(480, max(5, weekendDistractionBudgetMinutes))
         notifyAt.formIntersection(Set(Self.nudgePercents))
     }
 }

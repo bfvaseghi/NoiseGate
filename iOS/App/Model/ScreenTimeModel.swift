@@ -149,32 +149,73 @@ final class ScreenTimeModel: ObservableObject {
 
     // MARK: - Paused tokens
 
-    func setDistractionApp(_ token: ApplicationToken, tracked: Bool) {
-        if tracked { pausedDistractions.applications.remove(token) }
-        else { pausedDistractions.applications.insert(token) }
+    func setDistractionApp(
+        _ token: ApplicationToken,
+        tracked: Bool,
+        for duration: PausedTokens.Duration = .indefinitely
+    ) {
+        if tracked { pausedDistractions.resume(application: token) }
+        else { pausedDistractions.pause(application: token, until: duration.end()) }
         applyTrackingChanges()
     }
 
-    func setDistractionWebDomain(_ token: WebDomainToken, tracked: Bool) {
-        if tracked { pausedDistractions.webDomains.remove(token) }
-        else { pausedDistractions.webDomains.insert(token) }
+    func setDistractionWebDomain(
+        _ token: WebDomainToken,
+        tracked: Bool,
+        for duration: PausedTokens.Duration = .indefinitely
+    ) {
+        if tracked { pausedDistractions.resume(webDomain: token) }
+        else { pausedDistractions.pause(webDomain: token, until: duration.end()) }
         applyTrackingChanges()
     }
 
-    func setMessagesApp(_ token: ApplicationToken, tracked: Bool) {
-        if tracked { pausedMessages.applications.remove(token) }
-        else { pausedMessages.applications.insert(token) }
+    func setMessagesApp(
+        _ token: ApplicationToken,
+        tracked: Bool,
+        for duration: PausedTokens.Duration = .indefinitely
+    ) {
+        if tracked { pausedMessages.resume(application: token) }
+        else { pausedMessages.pause(application: token, until: duration.end()) }
+        applyTrackingChanges()
+    }
+
+    /// Lifts any pause whose end has passed. Called when the app comes to the
+    /// foreground, because a pause that expires while the app is closed has
+    /// nothing else to notice it.
+    func expirePauses(now: Date = .now) {
+        let distractionsChanged = pausedDistractions.expire(now: now)
+        let messagesChanged = pausedMessages.expire(now: now)
+        guard distractionsChanged || messagesChanged else { return }
         applyTrackingChanges()
     }
 
     // MARK: - Settings and persistence
 
     func adjustBudget(_ keyPath: WritableKeyPath<BudgetConfig, Int>, by delta: Int) {
+        let before = todayBudgets
         config[keyPath: keyPath] = min(
             480,
             max(5, config[keyPath: keyPath] + delta)
         )
-        applyTrackingChanges()
+        // Rebuilding DeviceActivity is expensive, and editing a target that
+        // does not apply today — the weekend one on a Tuesday — changes
+        // nothing about the thresholds currently armed.
+        if todayBudgets == before { savePreferences() } else { applyTrackingChanges() }
+    }
+
+    /// Turns the separate weekend target on or off. Only rebuilds monitoring
+    /// when the switch actually changes what today is measured against.
+    func setWeekendBudgets(_ enabled: Bool) {
+        guard config.weekendBudgetsEnabled != enabled else { return }
+        let before = todayBudgets
+        config.weekendBudgetsEnabled = enabled
+        if todayBudgets == before { savePreferences() } else { applyTrackingChanges() }
+    }
+
+    /// The pair of targets in force right now, used to decide whether a
+    /// settings edit needs a monitoring rebuild.
+    private var todayBudgets: [Int] {
+        [config.distractionBudget(on: .now), config.messagesBudgetMinutes]
     }
 
     /// Call after a picker, pause toggle, or budget edit. Old checkpoint floors
@@ -233,6 +274,10 @@ final class ScreenTimeModel: ObservableObject {
         )
         pausedMessages.applications.formIntersection(messagesSelection.applicationTokens)
         pausedMessages.webDomains.removeAll()
+        // Drops expiry entries for tokens that just left the selection, so a
+        // stale end date cannot outlive the pause it belonged to.
+        _ = pausedDistractions.expire()
+        _ = pausedMessages.expire()
     }
 
     @discardableResult
@@ -259,7 +304,7 @@ final class ScreenTimeModel: ObservableObject {
                 snapshot.distractionMinutes = 0
                 snapshot.messagesMinutes = 0
             }
-            snapshot.distractionBudgetMinutes = config.distractionBudgetMinutes
+            snapshot.distractionBudgetMinutes = config.distractionBudget(on: .now)
             snapshot.messagesBudgetMinutes = config.messagesBudgetMinutes
             snapshot.distractionsConfigured = !activeDistractionApps.isEmpty
                 || !activeDistractionWebDomains.isEmpty
@@ -290,6 +335,11 @@ final class ScreenTimeModel: ObservableObject {
         center.stopMonitoring([.daily])
         var events: [DeviceActivityEvent.Name: DeviceActivityEvent] = [:]
         let percents = BudgetConfig.progressPercents + BudgetConfig.overtimePercents
+        // A repeating daily schedule carries one set of thresholds, and the
+        // per-activity event budget is already nearly full, so arm the budget
+        // that applies today. `intervalDidStart` flags a rebuild when the
+        // following day needs a different one.
+        let distractionBudget = config.distractionBudget(on: .now)
         let generation = (store.load(
             Int.self,
             forKey: StoreKey.monitoringGeneration
@@ -301,12 +351,12 @@ final class ScreenTimeModel: ObservableObject {
                     kind: "distractions",
                     percent: percent,
                     generation: generation,
-                    budgetMinutes: config.distractionBudgetMinutes
+                    budgetMinutes: distractionBudget
                 )] = makeEvent(
                     applications: activeDistractionApps,
                     webDomains: activeDistractionWebDomains,
                     thresholdMinutes: ThresholdEvent.thresholdMinutes(
-                        budget: config.distractionBudgetMinutes,
+                        budget: distractionBudget,
                         percent: percent
                     )
                 )

@@ -115,6 +115,30 @@ struct WidgetLedgerPresentation: Equatable {
         }
     }
 
+    /// A full sentence for Siri and Shortcuts. It reads `isFloor` from the
+    /// same place the widget does, so a spoken answer can never claim more
+    /// precision than the screen shows.
+    var spokenSummary: String {
+        let name = ledger == .distractions ? "Distractions" : "Messages"
+        switch level {
+        case .notConfigured:
+            return ledger == .distractions
+                ? "No distracting apps are selected yet."
+                : "No messaging apps are selected yet."
+        case .waitingForCheckpoint:
+            return "No \(name.lowercased()) checkpoint has been crossed today."
+        default:
+            let amount = isFloor
+                ? "at least \(minutes.asHoursMinutes)"
+                : minutes.asHoursMinutes
+            let verdict = minutes >= budgetMinutes
+                ? " That is past today's \(budgetMinutes.asHoursMinutes) budget."
+                : ""
+            return "\(name): \(amount) today, against a "
+                + "\(budgetMinutes.asHoursMinutes) budget.\(verdict)"
+        }
+    }
+
     var signalText: String {
         switch level {
         case .notConfigured:

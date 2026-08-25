@@ -219,17 +219,48 @@ require(
     "project.yml declares a shield extension point",
 )
 
-contexts = {
-    'Self("Distractions")',
-    'Self("Messages")',
-    'Self("Distractions Week")',
-    'Self("Combined")',
-    'Self("Messages Week")',
+# The host and the report extension each declare this list, so they are the
+# one place the two targets can silently drift apart. Compare the declared
+# sets against each other, not just against a fixed list: a context added to
+# one file and forgotten in the other is a compile error in the target that
+# missed it, and that is exactly what this catches.
+expected_contexts = {
+    "Distractions",
+    "Messages",
+    "Distractions Week",
+    "Messages Week",
+    "Distractions Month",
+    "Messages Month",
+    "Distractions Movers",
+    "Distractions Rhythm",
+    "Messages Rhythm",
+    "Combined",
 }
+# `DeviceActivityReportSceneBuilder` is a result builder, and those cap at
+# ten children. Ten scenes is the ceiling, not a coincidence.
+require(
+    len(expected_contexts) <= 10,
+    f"{len(expected_contexts)} report scenes exceeds the result-builder limit of 10",
+)
+declared = {}
 for path in ("iOS/App/Views/TodayView.swift", "iOS/ReportExtension/NoiseGateReport.swift"):
-    value = text(path)
-    for context in contexts:
-        require(context in value, f"{path}: report context drift for {context}")
+    declared[path] = set(re.findall(r'Self\("([^"]+)"\)', text(path)))
+    require(
+        declared[path] == expected_contexts,
+        f"{path}: report contexts drift. "
+        f"missing={sorted(expected_contexts - declared[path])} "
+        f"unexpected={sorted(declared[path] - expected_contexts)}",
+    )
+
+report_source = text("iOS/ReportExtension/NoiseGateReport.swift")
+# Every declared context must be bound to exactly one scene in the extension.
+bound = set(re.findall(r"let context: DeviceActivityReport\.Context = \.(\w+)", report_source))
+constants = dict(re.findall(r'static let (\w+) = Self\("([^"]+)"\)', report_source))
+require(
+    {constants.get(name) for name in bound} == expected_contexts,
+    "Every report context must be bound to exactly one scene "
+    f"(unbound: {sorted(expected_contexts - {constants.get(n) for n in bound})})",
+)
 
 for contents in ROOT.rglob("*.xcassets/**/Contents.json"):
     try:

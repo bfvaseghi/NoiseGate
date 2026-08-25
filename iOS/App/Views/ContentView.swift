@@ -36,7 +36,15 @@ extension NoiseGateRoute {
 
 struct ContentView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @Environment(\.scenePhase) private var scenePhase
     @State private var tab: NGTab = .today
+
+    /// A Shortcut leaves its destination in the app group because it cannot
+    /// open a URL for us. Both a cold launch and a resume pick it up here.
+    private func consumePendingRoute() {
+        guard let route = NoiseGateRoute.consumePending() else { return }
+        tab = route.tab
+    }
 
     var body: some View {
         Group {
@@ -72,6 +80,11 @@ struct ContentView: View {
         .onOpenURL { url in
             guard let route = NoiseGateRoute(url: url) else { return }
             tab = route.tab
+        }
+        .onAppear { consumePendingRoute() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            consumePendingRoute()
         }
     }
 }

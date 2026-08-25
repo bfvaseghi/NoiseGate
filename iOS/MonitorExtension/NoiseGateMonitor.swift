@@ -45,8 +45,16 @@ final class NoiseGateMonitor: DeviceActivityMonitor {
             messagesConfigured: previous?.messagesConfigured ?? false,
             isFloor: true
         )
-        snapshot.distractionBudgetMinutes = config.distractionBudgetMinutes
+        let distractionBudget = config.distractionBudget(on: .now)
+        snapshot.distractionBudgetMinutes = distractionBudget
         snapshot.messagesBudgetMinutes = config.messagesBudgetMinutes
+        // Crossing into (or out of) a weekend changes which budget applies,
+        // and the armed thresholds were built for yesterday's. Ask the host to
+        // rebuild them; until it does, floors below stay truthful because a
+        // crossed threshold is a fact about usage, not about the target.
+        if let previous, previous.distractionBudgetMinutes != distractionBudget {
+            store.saveBool(true, forKey: StoreKey.monitoringNeedsReconfigure)
+        }
         snapshot.isFloor = true
         snapshot.monitoringIsActive = true
         snapshot.updatedAt = .now
@@ -107,6 +115,11 @@ final class NoiseGateMonitor: DeviceActivityMonitor {
             let elapsed = Date().timeIntervalSince(configuredAt)
             if elapsed >= 0 && elapsed < 120 { return }
         }
+
+        // An event armed for a different budget still proves the minutes
+        // were spent, so its floor was applied above. Its percentage is not
+        // today's percentage, though, so it must not be announced as one.
+        guard budget == config.budget(kind: kind, on: .now) else { return }
 
         guard config.notifies(atPercent: percent),
               let text = NudgeText.notification(

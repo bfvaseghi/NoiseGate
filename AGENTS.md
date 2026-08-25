@@ -32,6 +32,12 @@ The budgets, notifications, and charts exist to answer one question —
 *am I spending more time on this than I want to?* — and then stop.  The
 app's job ends at telling the truth about the number.
 
+App Intents answer from the widget snapshot, so on iPhone they answer with
+floors. `WidgetLedgerPresentation.spokenSummary` derives the wording from the
+same `isFloor` the widget renders, so a spoken answer can never claim more
+precision than the screen. Never give an intent access to the report
+extension's numbers.
+
 User-facing copy is neutral and factual.  State the ledger, number, threshold,
 and reset.  Do not praise, scold, joke, use exclamation points, or request
 critical or time-sensitive notification priority.  Notification copy belongs
@@ -45,7 +51,8 @@ Shared/
   AppGroup.swift                App-group identifiers and stable storage keys
   SharedStore.swift             Process lock + cross-process file-lock persistence
   PrivacyInfo.xcprivacy         Required-reason declaration for UserDefaults
-  BudgetConfig.swift            Budgets, notification choices, v1 migration
+  BudgetConfig.swift            Budgets (incl. weekend), notifications, v1 migration
+  HistoryExport.swift           CSV of the rolling history, floors marked
   UsageSnapshot.swift           Widget feed and v1 migration
   HistoryStore.swift            Rolling 30-day records and v1 migration
   NudgeText.swift               All iPhone and Mac notification copy
@@ -57,6 +64,7 @@ Shared/
   BudgetGauge.swift             Shared accessible ring
 iOS/
   App/                          SwiftUI app: Today / Apps / Budgets
+  App/Intents/                  App Intents and Shortcuts (floors only)
   ScreenTimeShared/             Selection safety and event-name contract
   MonitorExtension/             Threshold callbacks, floors, and nudges
   ReportExtension/              Exact private reports and charts
@@ -197,6 +205,46 @@ Publish observable totals at whole-minute granularity. Keep the widget feed
 alive with a lightweight 30-second heartbeat, and reload its timeline only
 when visible values change or an explicit state transition requires it.
 
+### 8a. Weekend budgets are per-day, never retroactive
+
+Distractions may carry a separate Saturday/Sunday target
+(`weekendBudgetsEnabled` + `weekendDistractionBudgetMinutes`). Read it through
+`config.distractionBudget(on:)` or `config.budget(kind:on:)` — never
+`distractionBudgetMinutes` — anywhere the question is "what does *this day*
+count against". `distractionBudgetMinutes` is the weekday setting and belongs
+only to the settings control that edits it. Messages keeps a single number.
+
+`Calendar.isDateInWeekend` decides which days are the weekend, so this stays
+correct outside a Monday-Friday week.
+
+A repeating daily schedule carries one set of thresholds and the per-activity
+event budget is nearly full, so events are armed for the budget that applies
+*today*. `intervalDidStart` sets `monitoringNeedsReconfigure` when the new day
+needs a different one. Until the host rebuilds, floors stay truthful — a
+crossed threshold is a fact about usage, not about the target — but a
+notification is suppressed unless the event's budget matches today's, because
+its percentage is not today's percentage.
+
+Editing a target that does not apply today must not tear down monitoring.
+`adjustBudget` and `setWeekendBudgets` compare the effective pair before and
+after and only rebuild when it moved.
+
+### 8b. A pause may expire
+
+`PausedTokens` stores an optional end date per token. No entry means
+indefinite, which is how every v1 pause was stored, so old data keeps
+behaving exactly as it did. `SelectionStore.paused*` lifts expired pauses on
+read, persists the pruned value, and flags a monitoring rebuild. The app also
+calls `expirePauses()` when it becomes active, because nothing else is running
+to notice a pause lapsing while it was closed.
+
+### 8c. Exported history must not misrepresent itself
+
+`HistoryExport` writes one `accuracy` column per row: `at_least` on iPhone
+(threshold floors) and `exact` on Mac. Never emit a file that mixes the two
+without saying which is which. Rows carry the budgets that applied on their
+own day, not today's.
+
 ### 8. Preserve historical targets
 
 Every `DayRecord` stores the budgets that applied to that day.  Charts compare
@@ -209,17 +257,35 @@ twice.
 
 ### 9. Keep report contexts exact
 
-The host and report extension string-match these six contexts:
+The host and report extension string-match these contexts, and each target
+declares the list separately, so `Scripts/validate_project.py` checks both:
 
 - `Distractions`
 - `Messages`
 - `Distractions Week`
 - `Messages Week`
+- `Distractions Month`
+- `Messages Month`
+- `Distractions Movers`
 - `Distractions Rhythm`
 - `Messages Rhythm`
+- `Combined`
 
-The weekly report must zero-fill all seven calendar days and divide the average
-by seven, not only by days that had usage.
+`DeviceActivityReportSceneBuilder` is a result builder, so the extension body
+caps at ten scenes. There are ten. Adding an eleventh needs a different
+structure, not one more line; `Scripts/validate_project.py` fails if the list
+grows past ten.
+
+The daily report must zero-fill every calendar day in its window and divide the
+average by the window length, not only by days that had usage. Week and Month
+share one summarizer parameterised by day count; 30 is `HistoryStore.maxDays`,
+which is all the history the app keeps, so no range may claim more.
+
+Movers compares the last seven days against the days before them, per app. It
+must stay inside the report extension: per-app exact usage is exactly what the
+privacy wall keeps there, so the comparison cannot be computed anywhere the
+host could read it. A percentage is suppressed below a one-minute-a-day
+baseline, where it would be arithmetic rather than information.
 
 The Rhythm scenes are the only ones given an `.hourly()` segment filter; every
 other range uses `.daily()`, which is far cheaper for Screen Time to compute.

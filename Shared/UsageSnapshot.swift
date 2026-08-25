@@ -122,7 +122,7 @@ struct UsageSnapshot: Codable, Equatable {
         if snap.dayKey != DayKey.today() {
             let config = BudgetConfig.load()
             snap = UsageSnapshot(
-                distractionBudgetMinutes: config.distractionBudgetMinutes,
+                distractionBudgetMinutes: config.distractionBudget(on: .now),
                 messagesBudgetMinutes: config.messagesBudgetMinutes,
                 distractionsConfigured: snap.distractionsConfigured,
                 messagesConfigured: snap.messagesConfigured,

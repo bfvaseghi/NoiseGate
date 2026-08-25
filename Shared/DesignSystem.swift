@@ -196,12 +196,17 @@ struct PosterHeader: View {
 struct NGChip: View {
     let text: String
     let tint: Color
+    /// Chips are a saturated fill with white on top, which holds for every
+    /// category colour. A chip tinted with `NG.ink` must pass `NG.paper`
+    /// instead: ink is near-white in dark mode, and white on white is
+    /// invisible.
+    var foreground: Color = .white
 
     var body: some View {
         Text(text.uppercased())
             .font(.ngLabel(10))
             .tracking(1.5)
-            .foregroundStyle(.white)
+            .foregroundStyle(foreground)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
             .background(tint, in: Capsule())

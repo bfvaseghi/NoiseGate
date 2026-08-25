@@ -4,6 +4,7 @@ import WidgetKit
 
 struct SettingsView: View {
     @EnvironmentObject private var model: ScreenTimeModel
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var accent = AccentTheme.current
 
     var body: some View {
@@ -21,6 +22,14 @@ struct SettingsView: View {
                     minutes: model.config.distractionBudgetMinutes,
                     caption: "Daily target for the distracting apps and sites you chose."
                 ) { model.adjustBudget(\.distractionBudgetMinutes, by: $0) }
+
+                WeekendBudgetCard(
+                    enabled: model.config.weekendBudgetsEnabled,
+                    weekdayMinutes: model.config.distractionBudgetMinutes,
+                    weekendMinutes: model.config.weekendDistractionBudgetMinutes,
+                    setEnabled: { model.setWeekendBudgets($0) },
+                    adjust: { model.adjustBudget(\.weekendDistractionBudgetMinutes, by: $0) }
+                )
 
                 BudgetDial(
                     chip: "Messages", tint: NG.msg,
@@ -77,10 +86,11 @@ struct SettingsView: View {
 
                 AccentPicker(selection: $accent)
 
+                HistoryExportCard()
+
                 Spacer(minLength: 96)
             }
-            .frame(maxWidth: 560)
-            .frame(maxWidth: .infinity)
+            .ngReadingWidth(sizeClass)
             .padding(.horizontal, 20)
         }
         .scrollIndicators(.hidden)
@@ -275,6 +285,86 @@ struct BudgetTrack: View {
 
 /// Accent selector for the Distractions ledger. Writing the choice reloads
 /// widget timelines so the Home Screen picks up the new colour immediately.
+/// A separate Saturday and Sunday target for Distractions. Every chart
+/// compares a day against the budget that applied on that day, so turning
+/// this on never rewrites how last week was judged.
+struct WeekendBudgetCard: View {
+    let enabled: Bool
+    let weekdayMinutes: Int
+    let weekendMinutes: Int
+    let setEnabled: (Bool) -> Void
+    let adjust: (Int) -> Void
+
+    /// Live value while a drag is in flight, matching `BudgetDial`: the
+    /// committed budget only moves on release.
+    @State private var dragMinutes: Int?
+
+    private var shownMinutes: Int { dragMinutes ?? weekendMinutes }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            NGChip(text: "Weekends", tint: NG.distraction)
+
+            Toggle(isOn: Binding(get: { enabled }, set: setEnabled)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Saturday and Sunday differ")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(NG.ink)
+                    Text(enabled
+                            ? "\(weekendMinutes.asHoursMinutes) at weekends, \(weekdayMinutes.asHoursMinutes) on weekdays"
+                            : "\(weekdayMinutes.asHoursMinutes) every day")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(NG.inkSoft)
+                }
+            }
+            .tint(NG.distraction)
+
+            if enabled {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(shownMinutes.asHoursMinutes)
+                        .font(.ngNumber(30))
+                        .foregroundStyle(NG.ink)
+                        .contentTransition(.numericText())
+                    Text("PER WEEKEND DAY")
+                        .font(.ngLabel(10))
+                        .tracking(2)
+                        .foregroundStyle(NG.inkSoft)
+                }
+
+                BudgetTrack(
+                    minutes: shownMinutes,
+                    tint: NG.distraction,
+                    onDrag: { dragMinutes = $0 },
+                    onCommit: { target in
+                        dragMinutes = nil
+                        if target != weekendMinutes { adjust(target - weekendMinutes) }
+                    }
+                )
+                .accessibilityHidden(true)
+            }
+
+            Text("Every chart compares a day against the budget that applied on that day, so past days keep their own target. Messages keeps one number.")
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(NG.inkSoft)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ngCard()
+        .sensoryFeedback(.selection, trigger: shownMinutes)
+        .accessibilityElement(children: .contain)
+        .accessibilityValue(enabled
+            ? "\(weekendMinutes.asHoursMinutes) per weekend day"
+            : "Off")
+        .accessibilityAdjustableAction { direction in
+            guard enabled else { return }
+            switch direction {
+            case .increment: adjust(5)
+            case .decrement: adjust(-5)
+            @unknown default: break
+            }
+        }
+    }
+}
+
 struct AccentPicker: View {
     @Binding var selection: AccentTheme
 

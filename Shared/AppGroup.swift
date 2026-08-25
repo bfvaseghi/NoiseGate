@@ -35,6 +35,7 @@ enum StoreKey {
     static let monitoringConfiguredAt = "monitoringConfiguredAt.v2"
     static let usageHistory = "usageHistory"        // [DayRecord] JSON — finished days
     static let accentTheme = "accentTheme"          // AccentTheme rawValue
+    static let pendingRoute = "pendingRoute"        // NoiseGateRoute rawValue (Shortcuts)
     static let macDistractionApps = "macNoiseApps"  // [String] bundle ids (macOS)
     static let macMessagesApps = "macMessagesApps"  // [String] bundle ids (macOS)
     static let macSelections = "macSelections.v2"   // MacSelections JSON (macOS)
