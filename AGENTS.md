@@ -335,6 +335,14 @@ restart monitoring per drag event.
   boundary, even if a legacy snapshot omitted its `isFloor` marker.
 - iPhone weekly widgets report only confirmed budget crossings. Never label a
   checkpoint-only or missing day as under budget.
+- A dashed stroke means **no data**: a hollow ring with nothing measured yet,
+  or an outlined day with no record. It never means a budget. Budgets are
+  drawn by splitting the bar at that day's own target — ledger colour below,
+  `NG.alarm` above — so the red part is the overage at its own size. A dashed
+  reference line over the bars drew vertical risers between the weekday and
+  weekend targets that read as an empty box floating over the weekend, and a
+  shaded band just hid behind the bars. Name the target in a key beside the
+  chart; a split with no key is only two colours.
 - Respect Reduce Motion.  Every visual gauge needs a combined accessibility
   label and value.
 - `Design/NoiseGateIcon.svg` is the editable vector reference, and

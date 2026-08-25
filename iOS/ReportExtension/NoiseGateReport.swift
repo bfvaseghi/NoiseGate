@@ -625,9 +625,6 @@ struct WeekSummary {
         let minutes: Int
         let budgetMinutes: Int?
         var id: Date { date }
-        var reachedBudget: Bool {
-            budgetMinutes.map { minutes >= $0 } ?? false
-        }
     }
 }
 
@@ -759,6 +756,37 @@ struct WeekActivityView: View {
     /// window labels weeks instead of days.
     private var isLongWindow: Bool { dayCount > 10 }
 
+    /// Taken from the days themselves rather than from `BudgetConfig`, so the
+    /// key cannot disagree with the bars it is describing — and so this stays
+    /// off the cross-process store during a render.
+    private var weekdayBudget: Int? {
+        summary.days.last { !Calendar.current.isDateInWeekend($0.date) }?.budgetMinutes
+    }
+
+    private var weekendBudget: Int? {
+        summary.days.last { Calendar.current.isDateInWeekend($0.date) }?.budgetMinutes
+    }
+
+    /// Says what the red part of each bar is measured from. Without it the
+    /// split is just two colours.
+    @ViewBuilder
+    private var budgetKey: some View {
+        if let weekday = weekdayBudget {
+            HStack(spacing: 7) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(NG.alarm)
+                    .frame(width: 11, height: 11)
+                Text(weekendBudget.map { $0 == weekday
+                        ? "Red is time past \(weekday.asHoursMinutes)"
+                        : "Red is time past \(weekday.asHoursMinutes) · \($0.asHoursMinutes) Sat & Sun" }
+                    ?? "Red is time past \(weekday.asHoursMinutes)")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(NG.inkSoft)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -785,25 +813,35 @@ struct WeekActivityView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(NG.inkSoft)
             } else {
+                // Each bar is split at that day's own budget: the ledger
+                // colour up to the target, alarm above it. The red part is
+                // the overage drawn at its own size, so it needs no reference
+                // line — and it steps with a weekend budget by itself. A
+                // dashed budget line drew vertical risers between weekday and
+                // weekend targets that read as an empty box over the weekend.
                 Chart {
                     ForEach(summary.days) { day in
-                        BarMark(
-                            x: .value("Day", day.date, unit: .day),
-                            y: .value("Minutes", day.minutes)
-                        )
-                        .foregroundStyle(
-                            day.reachedBudget ? NG.alarm : tint
-                        )
-                        .cornerRadius(isLongWindow ? 2 : 4)
-                    }
-                    ForEach(summary.days) { day in
-                        if let budget = day.budgetMinutes {
-                            LineMark(
+                        if let budget = day.budgetMinutes, day.minutes > budget {
+                            BarMark(
                                 x: .value("Day", day.date, unit: .day),
-                                y: .value("Daily budget", budget)
+                                yStart: .value("Start", 0),
+                                yEnd: .value("Budget", budget)
                             )
-                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 4]))
-                            .foregroundStyle(NG.inkSoft)
+                            .foregroundStyle(tint)
+                            BarMark(
+                                x: .value("Day", day.date, unit: .day),
+                                yStart: .value("Budget", budget),
+                                yEnd: .value("Minutes", day.minutes)
+                            )
+                            .foregroundStyle(NG.alarm)
+                            .cornerRadius(isLongWindow ? 2 : 4)
+                        } else {
+                            BarMark(
+                                x: .value("Day", day.date, unit: .day),
+                                y: .value("Minutes", day.minutes)
+                            )
+                            .foregroundStyle(tint)
+                            .cornerRadius(isLongWindow ? 2 : 4)
                         }
                     }
                 }
@@ -829,6 +867,8 @@ struct WeekActivityView: View {
                     }
                 }
                 .frame(height: 118)
+
+                budgetKey
 
                 if !summary.topApps.isEmpty {
                     Divider()

@@ -102,24 +102,34 @@ private struct MacWeekChart: View {
                     .font(.ngLabel(10))
                     .tracking(1.5)
                     .foregroundStyle(NG.inkSoft)
+                // Split at each day's own budget rather than drawing a
+                // dashed reference line over the bars: the red part is the
+                // overage at its own size, and it steps with a weekend budget
+                // without a line having to jump.
                 Chart {
                     ForEach(records) { day in
-                        BarMark(
-                            x: .value("Day", day.date, unit: .day),
-                            y: .value("Minutes", day.distractionMinutes)
-                        )
-                        .foregroundStyle(
-                            day.distractionReachedBudget ? NG.alarm : NG.distraction
-                        )
-                        .cornerRadius(3)
-                    }
-                    ForEach(records) { day in
-                        LineMark(
-                            x: .value("Day", day.date, unit: .day),
-                            y: .value("Daily budget", day.distractionBudgetMinutes)
-                        )
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                        .foregroundStyle(NG.inkSoft)
+                        if day.distractionMinutes > day.distractionBudgetMinutes {
+                            BarMark(
+                                x: .value("Day", day.date, unit: .day),
+                                yStart: .value("Start", 0),
+                                yEnd: .value("Budget", day.distractionBudgetMinutes)
+                            )
+                            .foregroundStyle(NG.distraction)
+                            BarMark(
+                                x: .value("Day", day.date, unit: .day),
+                                yStart: .value("Budget", day.distractionBudgetMinutes),
+                                yEnd: .value("Minutes", day.distractionMinutes)
+                            )
+                            .foregroundStyle(NG.alarm)
+                            .cornerRadius(3)
+                        } else {
+                            BarMark(
+                                x: .value("Day", day.date, unit: .day),
+                                y: .value("Minutes", day.distractionMinutes)
+                            )
+                            .foregroundStyle(NG.distraction)
+                            .cornerRadius(3)
+                        }
                     }
                 }
                 .chartXAxis {
