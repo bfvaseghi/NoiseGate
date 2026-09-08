@@ -117,21 +117,16 @@ struct UsageSnapshot: Codable, Equatable {
     /// Loads today's snapshot; a stale snapshot from a previous day is reset
     /// so the widget never shows yesterday's numbers.
     static func loadToday() -> UsageSnapshot {
-        var snap = SharedStore.shared.load(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
+        let captured = SharedStore.shared.load(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
             ?? UsageSnapshot()
-        if snap.dayKey != DayKey.today() {
-            let config = BudgetConfig.load()
-            snap = UsageSnapshot(
-                distractionBudgetMinutes: config.distractionBudget(on: .now),
-                messagesBudgetMinutes: config.messagesBudgetMinutes,
-                distractionsConfigured: snap.distractionsConfigured,
-                messagesConfigured: snap.messagesConfigured,
-                isFloor: snap.isFloor,
-                monitoringIsActive: snap.monitoringIsActive,
-                updatedAt: snap.updatedAt
-            )
-        }
-        return snap
+        #if os(iOS)
+        let accuracy: WidgetAccuracy = .lowerBound
+        #else
+        let accuracy: WidgetAccuracy = .exact
+        #endif
+        return WidgetRefreshSchedule.snapshotForDisplay(
+            captured, config: BudgetConfig.load(), accuracy: accuracy, now: .now
+        )
     }
 
     func save() {

@@ -38,28 +38,33 @@ enum StreakStats {
         window: Int = 7,
         today: String = DayKey.today()
     ) -> Summary {
-        let finished = records
-            .filter { $0.dayKey != today }
-            .sorted { $0.dayKey < $1.dayKey }
+        let finished = HistoryStore.canonicalized(records)
+            .filter { !$0.isFloor && $0.dayKey < today }
 
         var summary = Summary()
         summary.todayReachedBudget = snapshot.distractionsConfigured
             && snapshot.distractionMinutes >= snapshot.distractionBudgetMinutes
 
-        let recent = Array(finished.suffix(window))
+        let safeWindow = max(0, window)
+        let recent = Array(finished.suffix(safeWindow))
         summary.totalDays = recent.count
         summary.underBudgetDays = recent.filter { !$0.distractionReachedBudget }.count
         if !recent.isEmpty {
             summary.averageMinutes = recent.reduce(0) { $0 + $1.distractionMinutes } / recent.count
         }
 
-        // Run length walks backwards from the most recent finished day.
+        // A missing day or a checkpoint floor cannot prove an unbroken run.
+        var expectedDay = DayKey.date(from: today)
         for record in finished.reversed() {
-            if record.distractionReachedBudget { break }
+            guard let next = expectedDay,
+                  let previous = Calendar.current.date(byAdding: .day, value: -1, to: next),
+                  record.dayKey == DayKey.today(previous),
+                  !record.distractionReachedBudget else { break }
             summary.underBudgetRun += 1
+            expectedDay = previous
         }
 
-        let prior = finished.dropLast(window).suffix(window)
+        let prior = finished.dropLast(safeWindow).suffix(safeWindow)
         if prior.count >= 3 {
             summary.priorAverageMinutes = prior.reduce(0) { $0 + $1.distractionMinutes } / prior.count
         }

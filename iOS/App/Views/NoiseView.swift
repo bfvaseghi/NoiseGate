@@ -15,11 +15,7 @@ struct NoiseView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                PosterHeader(
-                    eyebrow: "Signal only",
-                    title: "APPS.",
-                    detail: "Only the apps listed here are counted. Everything else stays untracked."
-                )
+                SignalHeader(title: "Apps", detail: "Choose what counts.")
                 .padding(.top, 8)
 
                 TrackListCard(
@@ -28,9 +24,9 @@ struct NoiseView: View {
                     selection: model.distractionSelection,
                     paused: model.pausedDistractions,
                     excludedApps: model.messagesSelection.applicationTokens,
-                    emptyHint: "No distractions selected. Add only the feeds, swiping, and other apps you want this total to mean.",
-                    footnote: "Messages selected below are automatically excluded. Whole categories are rejected so useful activity cannot leak into this total.",
-                    actionTitle: "Add apps",
+                    emptyHint: "Choose distracting apps and sites.",
+                    footnote: "Messaging apps stay in their own total.",
+                    actionTitle: "Edit",
                     addApps: {
                         distractionBeforePicker = model.distractionSelection
                         showDistractionPicker = true
@@ -44,9 +40,9 @@ struct NoiseView: View {
                     tint: NG.msg,
                     selection: model.messagesSelection,
                     paused: model.pausedMessages,
-                    emptyHint: "Add the Messages app to keep conversation time on its own line.",
-                    footnote: "Messages is app-only. FaceTime and WhatsApp stay invisible unless you deliberately choose them here.",
-                    actionTitle: "Add Messages",
+                    emptyHint: "Choose the messaging apps to count.",
+                    footnote: "Only the apps you select here count.",
+                    actionTitle: "Edit",
                     addApps: {
                         messagesBeforePicker = model.messagesSelection
                         showMessagesPicker = true
@@ -55,7 +51,7 @@ struct NoiseView: View {
                     setWebDomain: { _, _, _ in }
                 )
 
-                Spacer(minLength: 96)
+                Spacer(minLength: 24)
             }
             .ngReadingWidth(sizeClass)
             .padding(.horizontal, 20)
@@ -122,7 +118,7 @@ struct TrackListCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                NGChip(text: chip, tint: tint)
+                SignalLabel(title: chip, tint: tint)
                 if pausedCount > 0 {
                     Text("\(pausedCount) paused")
                         .font(.ngLabel(10))
@@ -132,10 +128,10 @@ struct TrackListCard: View {
                 Spacer()
                 Button(action: addApps) {
                     Label(actionTitle, systemImage: "plus")
-                        .font(.system(size: 13.5, weight: .bold))
+                        .font(.subheadline.weight(.medium))
                         .foregroundStyle(tint)
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .frame(minHeight: 44)
                         .background(tint.opacity(0.14), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -171,7 +167,8 @@ struct TrackListCard: View {
                         toggleRow(
                             isOn: !paused.webDomains.contains(token),
                             enabled: true,
-                            note: nil,
+                            note: paused.webDomains.contains(token)
+                                ? pauseNote(paused.expiry(forWebDomain: token)) : nil,
                             set: { tracked in
                                 if tracked { setWebDomain(token, true, .indefinitely) }
                                 else {
@@ -185,9 +182,11 @@ struct TrackListCard: View {
                 }
             }
 
-            Text(footnote)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
+            DisclosureGroup("About tracking") {
+                Text(footnote + " Pausing changes which apps appear in reports. Resuming can include earlier time from the same day.")
+                    .font(.footnote).foregroundStyle(NG.inkSoft)
+            }
+            .font(.footnote).tint(NG.inkSoft)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .ngCard()
@@ -207,7 +206,7 @@ struct TrackListCard: View {
             }
             Button("Cancel", role: .cancel) { pending = nil }
         } message: {
-            Text("It stays in your list either way. Paused time is not counted and not blocked.")
+            Text("It stays in your list. Resuming can include earlier time from the same day.")
         }
     }
 

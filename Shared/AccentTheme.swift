@@ -24,11 +24,22 @@ enum AccentTheme: String, CaseIterable, Identifiable, Sendable {
 
     var color: Color {
         switch self {
-        case .amber: return Color(light: 0xE07C0E, dark: 0xF59A2E)
-        case .ember: return Color(light: 0xD1495B, dark: 0xEE6B7C)
-        case .violet: return Color(light: 0x7C4DBE, dark: 0xA579E4)
-        case .moss: return Color(light: 0x4F7942, dark: 0x77A566)
+        case .amber: return Color(light: 0x895909, dark: 0xF3B755)
+        case .ember: return Color(light: 0xA53851, dark: 0xF49AAA)
+        case .violet: return Color(light: 0x7545B5, dark: 0xBC96F3)
+        case .moss: return Color(light: 0x426B37, dark: 0x94BD83)
         case .slate: return Color(light: 0x4A6076, dark: 0x8AA3BB)
+        }
+    }
+
+    /// The instrument face always has dark ink behind its illuminated marks.
+    var instrumentColor: Color {
+        switch self {
+        case .amber: return Color(light: 0xEAB866, dark: 0xEAB866)
+        case .ember: return Color(light: 0xF49AAA, dark: 0xF49AAA)
+        case .violet: return Color(light: 0xBC96F3, dark: 0xBC96F3)
+        case .moss: return Color(light: 0xA8C990, dark: 0xA8C990)
+        case .slate: return Color(light: 0xA8BFD4, dark: 0xA8BFD4)
         }
     }
 

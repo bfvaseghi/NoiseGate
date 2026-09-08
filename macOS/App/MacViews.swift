@@ -5,88 +5,68 @@ import UserNotifications
 struct MenuView: View {
     @EnvironmentObject private var model: MacModel
 
-    private var distractionOver: Bool {
-        model.distractionMinutesToday > model.todayDistractionBudget
-            && model.todayDistractionBudget > 0
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("NOISEGATE")
-                    .font(.ngLabel(10))
-                    .tracking(2.5)
-                    .foregroundStyle(NG.alarm)
-                Text("TODAY.")
-                    .font(.ngDisplay(30))
-                    .foregroundStyle(NG.ink)
-            }
-
-            HStack(spacing: 18) {
-                BudgetGauge(
-                    title: "Distractions",
-                    minutes: model.distractionMinutesToday,
-                    budgetMinutes: model.todayDistractionBudget,
-                    tint: NG.distraction,
-                    isConfigured: !model.distractionBundleIDs.isEmpty,
-                    size: 96
-                )
-                BudgetGauge(
-                    title: "Messages",
-                    minutes: model.messagesMinutesToday,
-                    budgetMinutes: model.config.messagesBudgetMinutes,
-                    tint: NG.msg,
-                    isConfigured: !model.messagesBundleIDs.isEmpty,
-                    size: 96
-                )
-            }
-            .frame(maxWidth: .infinity)
-
-            if distractionOver {
-                Label {
-                    Text("Distractions are \((model.distractionMinutesToday - model.todayDistractionBudget).asHoursMinutes) over budget today. Resets at midnight.")
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(NG.inkSoft)
-                } icon: {
-                    Image(systemName: "gauge.with.needle")
-                        .foregroundStyle(NG.alarm)
-                }
-            }
-
-            Label(model.trackingDetail, systemImage: trackingIcon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
-
+        VStack(alignment: .leading, spacing: 18) {
+            SignalHeader(title: "Today", badge: "This Mac")
+            ledger(title: "Distractions", minutes: model.distractionMinutesToday,
+                   budget: model.todayDistractionBudget, tint: NG.distraction,
+                   configured: !model.distractionBundleIDs.isEmpty, isInstrument: true)
+            ledger(title: "Messages", minutes: model.messagesMinutesToday,
+                   budget: model.config.messagesBudgetMinutes, tint: NG.msg,
+                   configured: !model.messagesBundleIDs.isEmpty)
+            Label(model.trackingDetail,
+                  systemImage: !model.isSessionActive ? "lock" : (model.isUserIdle ? "pause.circle" : "circle.fill"))
+                .font(.caption).foregroundStyle(NG.inkSoft)
             MacWeekChart(records: model.weekRecords)
-
-            Text("Only the apps you selected are counted. Everything else is untracked. Nothing is blocked.")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
-
             Divider()
-
             HStack {
-                SettingsLink {
-                    Label("Settings", systemImage: "gearshape")
-                }
+                SettingsLink { Label("Settings", systemImage: "gearshape") }
                 Spacer()
-                Button(role: .destructive) {
-                    NSApp.terminate(nil)
-                } label: {
-                    Label("Quit", systemImage: "power")
-                }
+                Button("Quit") { NSApp.terminate(nil) }
             }
             .controlSize(.small)
         }
-        .padding(16)
-        .frame(width: 300)
-        .background(NG.paper)
+        .padding(20).frame(width: 340).background(NG.paper)
     }
 
-    private var trackingIcon: String {
-        if !model.isSessionActive { return "lock" }
-        if model.isUserIdle { return "pause.circle" }
-        return "circle.fill"
+    private func ledger(title: String, minutes: Int, budget: Int,
+                        tint: Color, configured: Bool, isInstrument: Bool = false) -> some View {
+        let ink = isInstrument ? NG.instrumentInk : NG.ink
+        let soft = isInstrument ? NG.instrumentSoft : NG.inkSoft
+        let accent = isInstrument ? NG.instrumentAccent : tint
+        let alarm = isInstrument ? NG.instrumentAlarm : NG.alarm
+        return VStack(alignment: .leading, spacing: 12) {
+            SignalLabel(title: title, tint: accent, foreground: ink)
+            if configured {
+                HStack(alignment: .firstTextBaseline) {
+                    SignalTimeReadout(minutes: minutes, size: isInstrument ? 60 : 32)
+                        .foregroundStyle(minutes >= budget ? alarm : ink)
+                    Spacer()
+                    Text(minutes >= budget
+                         ? (minutes == budget ? "Target reached" : "\((minutes - budget).asHoursMinutes) over")
+                         : "\((budget - minutes).asHoursMinutes) left")
+                        .font(.ngMono(10)).foregroundStyle(soft)
+                }
+                if isInstrument {
+                    SignalMeter(minutes: minutes, budget: budget,
+                                tint: minutes >= budget ? alarm : accent, inverted: true)
+                } else {
+                    SignalSegments(fraction: Double(minutes) / Double(max(1, budget)),
+                                   tint: minutes >= budget ? alarm : accent, height: 8)
+                    Text("Daily target · \(budget.asHoursMinutes)").font(.ngMono(10)).foregroundStyle(soft)
+                }
+            } else {
+                SettingsLink { Text("Choose apps").font(.subheadline) }
+                    .tint(accent)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(17)
+        .background(isInstrument ? NG.instrument : NG.card,
+                    in: RoundedRectangle(cornerRadius: isInstrument ? 5 : 0))
+        .overlay(alignment: .top) {
+            if !isInstrument { Rectangle().fill(NG.line).frame(height: 1) }
+        }
     }
 }
 
@@ -98,9 +78,8 @@ private struct MacWeekChart: View {
     var body: some View {
         if records.count >= 2 {
             VStack(alignment: .leading, spacing: 6) {
-                Text("DISTRACTIONS · \(records.count) RECORDED DAYS")
+                Text("Distractions · 7 days")
                     .font(.ngLabel(10))
-                    .tracking(1.5)
                     .foregroundStyle(NG.inkSoft)
                 // Split at each day's own budget rather than drawing a
                 // dashed reference line over the bars: the red part is the
@@ -139,6 +118,8 @@ private struct MacWeekChart: View {
                 }
                 .chartYAxis(.hidden)
                 .frame(height: 64)
+                Text("Red shows time over that day’s target")
+                    .font(.caption2).foregroundStyle(NG.inkSoft)
             }
         }
     }
@@ -153,14 +134,14 @@ struct MacSettingsView: View {
                 .tabItem { Label("Budgets", systemImage: "slider.horizontal.3") }
             AppPickerTab(
                 title: "Distracting apps",
-                subtitle: "Future time in these apps counts toward Distractions. Selecting one here moves future time out of Messages.",
+                subtitle: "Choose the apps to count as Distractions.",
                 isOn: { model.distractionBundleIDs.contains($0) },
                 toggle: model.toggleDistraction
             )
             .tabItem { Label("Distractions", systemImage: "waveform.slash") }
             AppPickerTab(
                 title: "Messaging apps",
-                subtitle: "Messages starts here by default. FaceTime and WhatsApp stay invisible unless you add them. Selecting an app here moves future time out of Distractions.",
+                subtitle: "Keep messaging time in its own total.",
                 isOn: { model.messagesBundleIDs.contains($0) },
                 toggle: model.toggleMessages
             )
@@ -206,6 +187,21 @@ struct MacSettingsView: View {
                 }
             }
 
+            Section("Weekends") {
+                Toggle("Different Distractions target", isOn: Binding(
+                    get: { model.config.weekendBudgetsEnabled }, set: model.setWeekendBudgets
+                ))
+                if model.config.weekendBudgetsEnabled {
+                    Stepper(value: Binding(
+                        get: { model.config.weekendDistractionBudgetMinutes },
+                        set: { model.adjustBudget(\.weekendDistractionBudgetMinutes,
+                                                  by: $0 - model.config.weekendDistractionBudgetMinutes) }
+                    ), in: 5...480, step: 5) {
+                        LabeledContent("Weekends", value: model.config.weekendDistractionBudgetMinutes.asHoursMinutes)
+                    }
+                }
+            }
+
             Section("Notifications") {
                 Toggle("Allow checkpoint notifications", isOn: Binding(
                     get: { model.config.notificationsEnabled },
@@ -242,7 +238,7 @@ struct MacSettingsView: View {
             }
 
             Section {
-                Text("Time counts only while this Mac is active and an explicitly selected app is in front. Counting pauses after two minutes without input. Browser sites are not inspected. Nothing is blocked.")
+                Text("Counts selected apps while this Mac is active. Pauses after two minutes without input.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -258,12 +254,14 @@ struct AppPickerTab: View {
     let isOn: (String) -> Bool
     let toggle: (String) -> Void
     @State private var search = ""
+    @State private var selectedOnly = false
 
     private var filtered: [DiscoveredApp] {
-        guard !search.isEmpty else { return model.installedApps }
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return model.installedApps.filter {
-            $0.name.localizedCaseInsensitiveContains(search)
-                || $0.bundleID.localizedCaseInsensitiveContains(search)
+            (!selectedOnly || isOn($0.bundleID)) && (query.isEmpty
+                || $0.name.localizedCaseInsensitiveContains(query)
+                || $0.bundleID.localizedCaseInsensitiveContains(query))
         }
     }
 
@@ -274,8 +272,10 @@ struct AppPickerTab: View {
             Text(subtitle)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            TextField("Search apps", text: $search)
-                .textFieldStyle(.roundedBorder)
+            HStack {
+                TextField("Search apps", text: $search).textFieldStyle(.roundedBorder)
+                Toggle("Selected", isOn: $selectedOnly).toggleStyle(.button)
+            }
             List(filtered) { app in
                 Toggle(isOn: Binding(
                     get: { isOn(app.bundleID) },
@@ -283,18 +283,25 @@ struct AppPickerTab: View {
                 )) {
                     VStack(alignment: .leading) {
                         Text(app.name)
-                        Text(app.bundleID)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                        if app.name != app.bundleID && model.installedApps.contains(where: {
+                            $0.name == app.name && $0.bundleID != app.bundleID
+                        }) {
+                            Text(app.bundleID).font(.caption2).foregroundStyle(NG.inkSoft)
+                        }
                     }
                 }
             }
+            if filtered.isEmpty {
+                Text(model.isDiscoveringApps ? "Finding apps…" : "No matching apps")
+                    .font(.callout).foregroundStyle(NG.inkSoft)
+            }
             HStack {
-                Text("Only time spent while an app is selected is counted.")
+                Text("Changes apply to future time.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Rescan") { model.discoverApps() }
+                Button(model.isDiscoveringApps ? "Scanning…" : "Rescan") { model.discoverApps() }
+                    .disabled(model.isDiscoveringApps)
                     .controlSize(.small)
             }
         }

@@ -14,9 +14,9 @@ enum MacWidgetFocus: String, AppEnum {
     case distractions
     case messages
 
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Focus")
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Widget view")
     static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .automatic: "Automatic",
+        .automatic: "Both",
         .distractions: "Distractions",
         .messages: "Messages"
     ]
@@ -25,10 +25,10 @@ enum MacWidgetFocus: String, AppEnum {
 struct NoiseGateMacWidgetIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "NoiseGate focus"
     static var description = IntentDescription(
-        "Choose which ledger the widget emphasizes."
+        "Show both ledgers or one."
     )
 
-    @Parameter(title: "Focus", default: .automatic)
+    @Parameter(title: "View", default: .automatic)
     var focus: MacWidgetFocus
 }
 
@@ -57,13 +57,6 @@ struct MacSnapshotEntry: TimelineEntry {
 }
 
 struct MacSnapshotProvider: AppIntentTimelineProvider {
-    private func currentSnapshot(now: Date = Date()) -> UsageSnapshot {
-        WidgetRefreshSchedule.currentMacSnapshot(
-            UsageSnapshot.loadToday(),
-            now: now
-        )
-    }
-
     func placeholder(in context: Context) -> MacSnapshotEntry {
         sampleEntry(focus: .automatic, includeHistory: context.family == .systemLarge)
     }
@@ -89,42 +82,45 @@ struct MacSnapshotProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> Timeline<MacSnapshotEntry> {
         let now = Date()
-        let includeHistory = context.family == .systemLarge
+        let config = BudgetConfig.load()
         let entry = makeEntry(focus: configuration.focus,
-                              includeHistory: includeHistory,
-                              now: now)
-        var entries = [entry]
-
-        // If the tracker stops heartbeating, show the paused state as a second
-        // scheduled entry. Rendering it costs nothing, whereas asking WidgetKit
-        // to reload at the staleness deadline would burn the refresh budget and
-        // get the widget throttled.
-        if let staleDate = WidgetRefreshSchedule.macStaleEntryDate(
-            snapshot: entry.snapshot, now: now
-        ) {
-            entries.append(
-                makeEntry(focus: configuration.focus,
-                          includeHistory: includeHistory,
-                          now: staleDate)
-            )
-        }
-
-        let refresh = WidgetRefreshSchedule.macNextRefresh(
-            snapshot: entry.snapshot,
-            now: now
+                              includeHistory: context.family == .systemLarge,
+                              now: now, config: config)
+        let midnight = WidgetRefreshSchedule.midnightEntryDate(after: now)
+        let nextDay = MacSnapshotEntry(
+            date: midnight,
+            snapshot: WidgetRefreshSchedule.snapshotForDisplay(
+                entry.snapshot, config: config, accuracy: .exact, now: midnight
+            ),
+            history: WidgetRefreshSchedule.rolloverHistory(
+                snapshot: entry.snapshot, history: entry.history, accuracy: .exact
+            ),
+            focus: entry.focus
         )
-        return Timeline(entries: entries, policy: .after(refresh))
+        let refresh = WidgetRefreshSchedule.macNextRefresh(snapshot: entry.snapshot, now: now)
+        return Timeline(entries: [entry, nextDay], policy: .after(refresh))
     }
 
     private func makeEntry(
         focus: MacWidgetFocus,
         includeHistory: Bool,
-        now: Date = Date()
+        now: Date = Date(),
+        config: BudgetConfig = BudgetConfig.load()
     ) -> MacSnapshotEntry {
-        MacSnapshotEntry(
+        let captured = SharedStore.shared.load(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
+            ?? UsageSnapshot()
+        var history = includeHistory ? HistoryStore.load() : []
+        if includeHistory && captured.dayKey != DayKey.today(now) {
+            history = WidgetRefreshSchedule.rolloverHistory(
+                snapshot: captured, history: history, accuracy: .exact
+            )
+        }
+        return MacSnapshotEntry(
             date: now,
-            snapshot: currentSnapshot(now: now),
-            history: includeHistory ? HistoryStore.load() : [],
+            snapshot: WidgetRefreshSchedule.snapshotForDisplay(
+                captured, config: config, accuracy: .exact, now: now
+            ),
+            history: history,
             focus: focus
         )
     }

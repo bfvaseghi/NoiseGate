@@ -115,6 +115,10 @@ struct PausedTokens: Codable, Equatable {
         return changed
     }
 
+    func expiry(forWebDomain token: WebDomainToken) -> Date? {
+        webDomainExpiry[token]
+    }
+
     func expiry(forApplication token: ApplicationToken) -> Date? {
         applicationExpiry[token]
     }

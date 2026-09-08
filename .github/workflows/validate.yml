@@ -16,8 +16,9 @@ jobs:
       - run: python3 Scripts/validate_project.py
       - run: python3 -m unittest discover -s Tests/python
 
-  apple-builds:
+  iphone-build:
     runs-on: macos-15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - run: brew install xcodegen
@@ -28,11 +29,20 @@ jobs:
           -sdk iphonesimulator -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO build
       - name: Run iPhone model tests
-        run: >-
-          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGate
-          -sdk iphonesimulator
-          -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16 Pro'
+        run: |
+          simulator_sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          simulator_id=$(xcrun simctl list devices available --json | python3 Scripts/select_simulator.py --sdk-version "$simulator_sdk")
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGate \
+          -sdk iphonesimulator \
+          -destination "platform=iOS Simulator,id=$simulator_id" \
           CODE_SIGNING_ALLOWED=NO test
+  mac-build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
       - name: Build Mac app and widget
         run: >-
           xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGateMac
