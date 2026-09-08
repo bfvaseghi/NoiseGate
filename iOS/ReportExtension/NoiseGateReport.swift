@@ -47,6 +47,7 @@ struct NoiseGateReportExtension: DeviceActivityReportExtension {
 struct ActivitySummary {
     var totalDuration: TimeInterval = 0
     var totalPickups: Int = 0
+    var budgetConfig = BudgetConfig.load()
     var topApps: [AppUsage] = []
 
     struct AppUsage: Identifiable {
@@ -58,21 +59,7 @@ struct ActivitySummary {
 
     var minutes: Int { Int(totalDuration / 60) }
 
-    /// Mean length of one visit — the number that separates a single sitting
-    /// from repeated checking. Nil until there is something to divide.
-    var averageSessionSeconds: Int? {
-        guard totalPickups > 0, totalDuration > 0 else { return nil }
-        return Int(totalDuration / Double(totalPickups))
-    }
-}
 
-extension Int {
-    /// Compact duration for session lengths, which are often under a minute.
-    var asSessionLength: String {
-        if self < 60 { return "\(self)s" }
-        let minutes = self / 60, seconds = self % 60
-        return seconds == 0 ? "\(minutes)m" : "\(minutes)m \(seconds)s"
-    }
 }
 
 extension DeviceActivityReport.Context {
@@ -104,9 +91,8 @@ private func summarize(
                     guard let token = app.application.token else { continue }
                     var entry = perApp[token] ?? (0, 0)
                     entry.duration += app.totalActivityDuration
-                    // How the time happened matters more than the total:
-                    // twelve short pickups and one long sitting are different
-                    // behaviours that a duration alone cannot tell apart.
+                    // Apple counts pickups made directly to this app.
+                    // This is not a count of every visit or app launch.
                     entry.pickups += app.numberOfPickups
                     perApp[token] = entry
                 }
@@ -153,150 +139,87 @@ struct MessagesReport: DeviceActivityReportScene {
 struct ActivityView: View {
     let summary: ActivitySummary
     let kind: ReportKind
+    @ScaledMetric(relativeTo: .largeTitle) private var valueSize: CGFloat = 76
 
     private var budgetMinutes: Int {
-        let config = BudgetConfig.load()
-        return kind == .distractions
-            ? config.distractionBudget(on: .now) : config.messagesBudgetMinutes
+        kind == .distractions ? summary.budgetConfig.distractionBudget(on: .now)
+            : summary.budgetConfig.messagesBudgetMinutes
     }
-
     private var minutes: Int { summary.minutes }
-    private var reachedBudget: Bool { minutes >= budgetMinutes && budgetMinutes > 0 }
-    private var overBudget: Bool { minutes > budgetMinutes && budgetMinutes > 0 }
-    private var fraction: Double {
-        budgetMinutes > 0 ? min(1, Double(minutes) / Double(budgetMinutes)) : 0
-    }
-
-    private var tint: Color { kind == .distractions ? NG.distraction : NG.msg }
-    private var ringColor: Color { reachedBudget ? NG.alarm : tint }
-
-    /// How far through the waking day it is, so the budget reading has
-    /// somewhere to sit. Anchored at 07:00 because a budget spent before
-    /// breakfast and one spent by midnight are not the same observation.
-    private var dayFraction: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let start = calendar.date(bySettingHour: 7, minute: 0, second: 0, of: now) ?? now
-        let end = calendar.date(bySettingHour: 23, minute: 0, second: 0, of: now) ?? now
-        guard end > start else { return 0 }
-        return min(1, max(0, now.timeIntervalSince(start) / end.timeIntervalSince(start)))
+    private var tint: Color { kind == .distractions ? NG.instrumentAccent : NG.msg }
+    private var ink: Color { kind == .distractions ? NG.instrumentInk : NG.ink }
+    private var softInk: Color { kind == .distractions ? NG.instrumentSoft : NG.inkSoft }
+    private var alarm: Color { kind == .distractions ? NG.instrumentAlarm : NG.alarm }
+    private var reached: Bool { minutes >= budgetMinutes }
+    private var state: String {
+        if minutes > budgetMinutes { return "\((minutes - budgetMinutes).asHoursMinutes) over" }
+        if reached { return "Target reached" }
+        return "\((budgetMinutes - minutes).asHoursMinutes) left"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            summaryRow
-            appBreakdown
-        }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var summaryRow: some View {
-        HStack(alignment: .top, spacing: 16) {
-            ZStack {
-                RingArc(
-                    fraction: fraction,
-                    color: ringColor,
-                    size: 92,
-                    isIndeterminate: summary.totalDuration == 0
-                )
-                VStack(spacing: 0) {
-                    Text(minutes.asHoursMinutes)
-                        .font(.ngNumber(21))
-                        .foregroundStyle(summary.totalDuration == 0 ? NG.inkSoft : ringColor)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
-                        .contentTransition(.numericText())
-                    Text("OF \(budgetMinutes.asHoursMinutes)")
-                        .font(.ngLabel(10))
-                        .tracking(0.8)
-                        .foregroundStyle(NG.inkSoft)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+        VStack(alignment: .leading, spacing: 14) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    readout
+                    Spacer(minLength: 4)
+                    status
                 }
-                .padding(20)
+                VStack(alignment: .leading, spacing: 4) { readout; status }
             }
-            .frame(width: 92, height: 92)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(kind == .distractions ? "Distractions" : "Messages")
-            .accessibilityValue(
-                "\(minutes) minutes of a \(budgetMinutes) minute budget"
-                    + (reachedBudget ? ", budget reached" : "")
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                if reachedBudget {
-                    Text(overBudget ? "OVER BUDGET" : "BUDGET REACHED")
-                        .font(.ngLabel(10))
-                        .tracking(1.8)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
-                        .background(NG.alarm, in: Capsule())
-                }
-
-                // The behavioural read: a total says how long, pickups say
-                // whether it arrived in one sitting or forty interruptions.
-                if summary.totalDuration == 0 {
-                    Text(kind == .distractions
-                            ? "Nothing recorded yet today."
-                            : "No messaging recorded yet today.")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(NG.inkSoft)
-                } else {
-                    if summary.totalPickups > 0 {
-                        StatLine(
-                            value: "\(summary.totalPickups)",
-                            unit: summary.totalPickups == 1 ? "pickup" : "pickups"
-                        )
-                        if let seconds = summary.averageSessionSeconds {
-                            StatLine(value: seconds.asSessionLength, unit: "average visit")
-                        }
+            if kind == .distractions {
+                SignalMeter(minutes: minutes, budget: budgetMinutes,
+                            tint: reached ? alarm : tint, inverted: true)
+            } else {
+                SignalSegments(fraction: Double(minutes) / Double(max(1, budgetMinutes)),
+                               tint: reached ? alarm : tint, height: 9)
+                Text("Daily target · \(budgetMinutes.asHoursMinutes)")
+                    .font(.ngMono(10)).foregroundStyle(softInk)
+            }
+            if summary.totalPickups > 0 {
+                Text("\(summary.totalPickups) \(summary.totalPickups == 1 ? "pickup" : "pickups")")
+                    .font(.ngMono(10)).foregroundStyle(softInk)
+            }
+            if summary.topApps.isEmpty {
+                Text(summary.totalDuration == 0 ? "No time recorded today." : "Tracked sites")
+                    .font(.subheadline).foregroundStyle(softInk)
+            } else if kind == .distractions || summary.topApps.count > 1 {
+                VStack(spacing: 10) {
+                    ForEach(summary.topApps) { app in
+                        AppRow(app: app, share: app.duration / max(1, summary.totalDuration), tint: tint,
+                               foreground: ink, secondary: softInk)
                     }
-                    StatLine(
-                        value: "\(Int((dayFraction * 100).rounded()))%",
-                        unit: "through the day"
-                    )
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    /// Per-app rows sit under the summary with a proportion bar each, so the
-    /// split is legible without reading four numbers.
-    @ViewBuilder
-    private var appBreakdown: some View {
-        if !summary.topApps.isEmpty, summary.totalDuration > 0 {
-            Divider()
-            VStack(spacing: 6) {
-                ForEach(summary.topApps) { app in
-                    AppRow(
-                        app: app,
-                        share: app.duration / summary.totalDuration,
-                        tint: tint
-                    )
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(kind == .distractions ? NG.instrument : NG.card)
     }
-}
 
-/// One number with its unit, aligned so several stack into a tidy column.
-private struct StatLine: View {
-    let value: String
-    let unit: String
+    private var readout: some View {
+        SignalTimeReadout(minutes: minutes, size: kind == .distractions ? valueSize : valueSize * 0.48)
+            .foregroundStyle(reached ? alarm : ink)
+            .accessibilityLabel(kind == .distractions ? "Distractions" : "Messages")
+            .accessibilityValue("\(minutes) minutes today")
+    }
 
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(value)
-                .font(.ngNumber(15))
-                .foregroundStyle(NG.ink)
-            Text(unit)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
+    private var status: some View {
+        Group {
+            if kind == .distractions {
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(minutes == budgetMinutes ? "Target" : abs(budgetMinutes - minutes).asHoursMinutes)
+                        .font(.ngNumber(20)).foregroundStyle(reached ? alarm : tint)
+                    Text(minutes == budgetMinutes ? "reached" : minutes > budgetMinutes ? "over target" : "left")
+                        .font(.ngMono(11)).foregroundStyle(softInk)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(state)
+            } else {
+                Text(state).font(.ngMono(11))
+                    .foregroundStyle(reached ? alarm : softInk)
+            }
         }
-        .accessibilityElement(children: .combine)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -304,28 +227,24 @@ private struct AppRow: View {
     let app: ActivitySummary.AppUsage
     let share: Double
     let tint: Color
+    var foreground: Color = NG.ink
+    var secondary: Color = NG.inkSoft
 
     var body: some View {
         HStack(spacing: 8) {
             Label(app.token)
                 .labelStyle(.titleAndIcon)
                 .font(.system(size: 12.5, weight: .semibold))
-                .foregroundStyle(NG.ink)
+                .foregroundStyle(foreground)
                 .lineLimit(1)
             Spacer(minLength: 6)
             // Share of the day's total for this ledger.
-            Capsule()
-                .fill(tint.opacity(0.16))
-                .frame(width: 46, height: 5)
-                .overlay(alignment: .leading) {
-                    Capsule()
-                        .fill(tint)
-                        .frame(width: max(3, 46 * share), height: 5)
-                }
+            SignalSegments(fraction: share, tint: tint, track: tint.opacity(0.16), height: 8, count: 12)
+                .frame(width: 46)
                 .accessibilityHidden(true)
             Text(Int(app.duration / 60).asHoursMinutes)
-                .font(.ngNumber(12.5))
-                .foregroundStyle(NG.inkSoft)
+                .font(.ngMono(12))
+                .foregroundStyle(secondary)
                 .frame(width: 44, alignment: .trailing)
         }
         // Combine rather than ignore: the app's name is rendered by the
@@ -477,7 +396,7 @@ private struct MoverRow: View {
     private var isUp: Bool { mover.deltaMinutesPerDay > 0 }
     /// Up is the alarm colour and down is the Messages teal, matching how
     /// every other over/under reading in the app is coloured.
-    private var tint: Color { isUp ? NG.alarm : NG.msg }
+    private var tint: Color { NG.inkSoft }
     private var share: Double { min(1, abs(mover.deltaMinutesPerDay) / widest) }
 
     private var change: String {
@@ -756,35 +675,15 @@ struct WeekActivityView: View {
     /// window labels weeks instead of days.
     private var isLongWindow: Bool { dayCount > 10 }
 
-    /// Taken from the days themselves rather than from `BudgetConfig`, so the
-    /// key cannot disagree with the bars it is describing — and so this stays
-    /// off the cross-process store during a render.
-    private var weekdayBudget: Int? {
-        summary.days.last { !Calendar.current.isDateInWeekend($0.date) }?.budgetMinutes
-    }
-
-    private var weekendBudget: Int? {
-        summary.days.last { Calendar.current.isDateInWeekend($0.date) }?.budgetMinutes
-    }
-
-    /// Says what the red part of each bar is measured from. Without it the
-    /// split is just two colours.
-    @ViewBuilder
+    /// Historical bars keep their own targets, including midweek edits.
     private var budgetKey: some View {
-        if let weekday = weekdayBudget {
-            HStack(spacing: 7) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(NG.alarm)
-                    .frame(width: 11, height: 11)
-                Text(weekendBudget.map { $0 == weekday
-                        ? "Red is time past \(weekday.asHoursMinutes)"
-                        : "Red is time past \(weekday.asHoursMinutes) · \($0.asHoursMinutes) Sat & Sun" }
-                    ?? "Red is time past \(weekday.asHoursMinutes)")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(NG.inkSoft)
-            }
-            .accessibilityElement(children: .combine)
+        Label {
+            Text("Red shows time over that day’s target").foregroundStyle(NG.inkSoft)
+        } icon: {
+            Image(systemName: "square.fill").foregroundStyle(NG.alarm)
         }
+            .font(.caption)
+            .accessibilityElement(children: .combine)
     }
 
     var body: some View {

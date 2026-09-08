@@ -16,26 +16,28 @@ enum HistoryExport {
     /// values here can contain a comma today, but a format that only works
     /// for today's values is a trap for the next one.
     static func field(_ value: String) -> String {
-        guard value.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" }) else {
+        guard value.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) else {
             return value
         }
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
-    static func row(_ record: DayRecord) -> String {
+    static func row(_ record: DayRecord, forceLowerBound: Bool = false) -> String {
         [
             field(record.dayKey),
             String(record.distractionMinutes),
             String(record.distractionBudgetMinutes),
             String(record.messagesMinutes),
             String(record.messagesBudgetMinutes),
-            record.isFloor ? "at_least" : "exact",
+            (forceLowerBound || record.isFloor) ? "at_least" : "exact",
         ].joined(separator: ",")
     }
 
     /// Oldest day first, so the file reads in the direction time runs.
-    static func csv(_ records: [DayRecord]) -> String {
-        ([header] + HistoryStore.canonicalized(records).map(row))
+    static func csv(_ records: [DayRecord], forceLowerBound: Bool = false) -> String {
+        ([header] + HistoryStore.canonicalized(records).map {
+            row($0, forceLowerBound: forceLowerBound)
+        })
             .joined(separator: "\n") + "\n"
     }
 

@@ -49,10 +49,10 @@ struct ContentView: View {
     var body: some View {
         Group {
             if model.isAuthorized {
-                ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
                     Group {
                         switch tab {
-                        case .today: TodayView()
+                        case .today: TodayView(chooseApps: { tab = .tracking })
                         case .tracking: NoiseView()
                         case .budgets: SettingsView()
                         }
@@ -89,124 +89,87 @@ struct ContentView: View {
     }
 }
 
-/// Floating capsule tab bar with a sliding ink pill.
+/// The bar occupies its own space so it never covers the final control.
 struct NGTabBar: View {
     @Binding var selection: NGTab
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var pill
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(NGTab.allCases) { tab in
-                Button {
-                    withAnimation(reduceMotion
-                        ? nil : .spring(response: 0.32, dampingFraction: 0.82)) {
-                        selection = tab
+                Button { selection = tab } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: tab.icon).font(.system(size: 17, weight: .medium))
+                        Text(tab.label).font(.caption.weight(.medium))
                     }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 16, weight: .bold))
-                        Text(tab.label.uppercased())
-                            .font(.ngLabel(10))
-                            .tracking(1.2)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .foregroundStyle(selection == tab ? NG.paper : NG.inkSoft)
-                    .background {
+                    .foregroundStyle(selection == tab ? NG.ink : NG.inkSoft)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .overlay(alignment: .top) {
                         if selection == tab {
-                            // Ink, not alarm: red carries one meaning in this
-                            // app — a budget reached — and a permanently red
-                            // tab would drain it of that meaning.
-                            Capsule()
-                                .fill(NG.ink)
-                                .matchedGeometryEffect(id: "pill", in: pill)
+                            Rectangle().fill(NG.brand).frame(width: 22, height: 3)
                         }
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(selection == tab ? .isSelected : [])
             }
         }
-        .padding(5)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().strokeBorder(NG.line, lineWidth: 1))
-        .shadow(color: NG.ink.opacity(0.12), radius: 18, y: 8)
-        .frame(maxWidth: 420)
+        .padding(.top, 8)
+        .overlay(alignment: .top) { Rectangle().fill(NG.line).frame(height: 1) }
+        .frame(maxWidth: 480)
     }
 }
 
-// MARK: - Onboarding: the poster
-
 struct OnboardingView: View {
     @EnvironmentObject private var model: ScreenTimeModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var revealed = false
+    @State private var requestingAccess = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Spacer()
-
-            Image(systemName: "waveform.slash")
-                .font(.system(size: 40, weight: .black))
-                .foregroundStyle(NG.alarm)
-                .padding(.bottom, 28)
-                .symbolEffect(
-                    .pulse,
-                    options: .repeating,
-                    isActive: revealed && !reduceMotion
-                )
-
-            VStack(alignment: .leading, spacing: -6) {
-                PosterLine("KEEP")
-                PosterLine("THE")
-                PosterLine("SIGNAL", accent: true)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 26) {
+                SignalHeader(title: "Keep the signal.")
+                Text("Choose what counts.")
+                    .font(.title3.weight(.medium)).foregroundStyle(NG.ink)
+                VStack(alignment: .leading, spacing: 22) {
+                    introduction("Distractions", tint: NG.distraction,
+                                 detail: "The apps and sites you want to watch.")
+                    introduction("Messages", tint: NG.msg,
+                                 detail: "Conversation time, on its own line.")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .ngCard()
+                Text("Everything else stays untracked.")
+                    .font(.subheadline).foregroundStyle(NG.inkSoft)
+                Button {
+                    requestingAccess = true
+                    Task {
+                        await model.requestAuthorization()
+                        requestingAccess = false
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        if requestingAccess { ProgressView().tint(NG.onInk) }
+                        Text(requestingAccess ? "Requesting access…" : "Connect Screen Time")
+                    }
+                    .font(.body.weight(.medium)).foregroundStyle(NG.onInk)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(NG.ink, in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .disabled(requestingAccess)
+                Text("Access lets NoiseGate measure your choices. It never blocks an app.")
+                    .font(.footnote).foregroundStyle(NG.inkSoft)
             }
-            .padding(.bottom, 24)
-
-            Text("NoiseGate tracks only the distracting apps you choose, plus Messages on a separate budget. Everything else on this device stays untracked, and nothing is ever blocked.")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
-                .frame(maxWidth: 340, alignment: .leading)
-
-            Spacer()
-
-            Button {
-                Task { await model.requestAuthorization() }
-            } label: {
-                Text("Allow Screen Time access")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 17)
-                    .background(NG.alarmGradient, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .padding(.bottom, 14)
-
-            Text("Apple keeps token identities opaque. NoiseGate can display Apple's private labels, but it cannot inspect or export the underlying app IDs.")
-                .font(.ngLabel(11))
-                .foregroundStyle(NG.inkSoft.opacity(0.8))
-                .frame(maxWidth: .infinity, alignment: .center)
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 8)
+            .padding(24).padding(.top, 48)
+            .frame(maxWidth: 520)
+            .frame(maxWidth: .infinity)
         }
-        .padding(28)
-        .frame(maxWidth: 560)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(NG.paper.ignoresSafeArea())
-        .onAppear {
-            withAnimation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.85).delay(0.1)) {
-                revealed = true
-            }
-        }
     }
 
-    private func PosterLine(_ text: String, accent: Bool = false) -> some View {
-        (Text(text).foregroundColor(accent ? NG.alarm : NG.ink)
-            + Text(".").foregroundColor(accent ? NG.ink : NG.alarm))
-            .font(.ngDisplay(84))
-            .opacity(revealed ? 1 : 0)
-            .offset(y: revealed ? 0 : 14)
+    private func introduction(_ title: String, tint: Color, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            SignalLabel(title: title, tint: tint)
+            Text(detail).font(.subheadline).foregroundStyle(NG.inkSoft)
+        }
     }
 }

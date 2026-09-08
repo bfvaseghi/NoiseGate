@@ -139,6 +139,9 @@ final class MacModel: NSObject, ObservableObject {
     /// which is the weekday setting.
     var todayDistractionBudget: Int { config.distractionBudget(on: .now) }
     @Published private(set) var installedApps: [DiscoveredApp] = []
+    @Published private(set) var isDiscoveringApps = false
+    @Published private(set) var weekRecords: [DayRecord] = []
+    private var discoveryRevision = 0
     @Published private(set) var isUserIdle = false
     @Published private(set) var isSessionActive = true
     @Published private(set) var activeAppName: String?
@@ -281,6 +284,15 @@ final class MacModel: NSObject, ObservableObject {
         config[keyPath: keyPath] = min(480, max(5, config[keyPath: keyPath] + delta))
         ledger.distractionBudgetMinutes = config.distractionBudget(on: .now)
         ledger.messagesBudgetMinutes = config.messagesBudgetMinutes
+        saveConfigAndPublish()
+        checkNudges()
+    }
+
+    func setWeekendBudgets(_ enabled: Bool) {
+        guard config.weekendBudgetsEnabled != enabled else { return }
+        checkpoint()
+        config.weekendBudgetsEnabled = enabled
+        ledger.distractionBudgetMinutes = config.distractionBudget(on: .now)
         saveConfigAndPublish()
         checkNudges()
     }
@@ -605,11 +617,14 @@ final class MacModel: NSObject, ObservableObject {
 
     // MARK: - Snapshot and history
 
-    var weekRecords: [DayRecord] {
-        var records = HistoryStore.lastDays(7).filter { $0.dayKey != ledger.dayKey }
-        records = Array(records.suffix(6))
+    private func refreshWeekRecords(now: Date) {
+        let first = Calendar.current.date(byAdding: .day, value: -6, to: now) ?? now
+        let cutoff = DayKey.today(first)
+        var records = HistoryStore.lastDays(7).filter {
+            $0.dayKey >= cutoff && $0.dayKey < ledger.dayKey
+        }
         records.append(ledger.dayRecord)
-        return records
+        if weekRecords != records { weekRecords = records }
     }
 
     private func persistLedger() {
@@ -655,6 +670,7 @@ final class MacModel: NSObject, ObservableObject {
         snapshot.save()
 
         if forceWidgetReload || displayChanged {
+            refreshWeekRecords(now: now)
             WidgetCenter.shared.reloadTimelines(ofKind: "NoiseGateMacWidget")
         }
     }
@@ -662,6 +678,9 @@ final class MacModel: NSObject, ObservableObject {
     // MARK: - App discovery
 
     func discoverApps() {
+        discoveryRevision += 1
+        let revision = discoveryRevision
+        isDiscoveringApps = true
         let running = workspace.runningApplications
             .filter { $0.activationPolicy == .regular }
             .compactMap { app in
@@ -684,7 +703,11 @@ final class MacModel: NSObject, ObservableObject {
             let sorted = found.values.sorted {
                 $0.name.localizedStandardCompare($1.name) == .orderedAscending
             }
-            await MainActor.run { self?.installedApps = sorted }
+            await MainActor.run {
+                guard let self, self.discoveryRevision == revision else { return }
+                self.installedApps = sorted
+                self.isDiscoveringApps = false
+            }
         }
     }
 

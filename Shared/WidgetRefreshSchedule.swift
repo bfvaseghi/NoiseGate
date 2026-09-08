@@ -39,16 +39,46 @@ enum WidgetRefreshSchedule {
         return min(inFiveMinutes, nextMidnight(after: now, calendar: calendar))
     }
 
-    /// When the tracker should be considered to have stopped heartbeating.
-    /// Rendered as a second timeline entry rather than a reload request, so
-    /// the paused state appears on time without spending refresh budget.
-    static func macStaleEntryDate(
-        snapshot: UsageSnapshot,
+    /// Midnight is predictable. A future missed heartbeat is not: publishing
+    /// a stale entry in advance can pause a healthy tracker until the next reload.
+    static func midnightEntryDate(after now: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
+        nextMidnight(after: now, calendar: calendar)
+    }
+
+    static func snapshotForDisplay(
+        _ captured: UsageSnapshot,
+        config: BudgetConfig,
+        accuracy: WidgetAccuracy,
         now: Date
-    ) -> Date? {
-        guard snapshot.monitoringIsActive else { return nil }
-        let deadline = snapshot.updatedAt.addingTimeInterval(46)
-        return deadline > now ? deadline : nil
+    ) -> UsageSnapshot {
+        var result = captured
+        if result.dayKey != DayKey.today(now) {
+            result = UsageSnapshot(
+                dayKey: DayKey.today(now),
+                distractionBudgetMinutes: config.distractionBudget(on: now),
+                messagesBudgetMinutes: config.messagesBudgetMinutes,
+                distractionsConfigured: captured.distractionsConfigured,
+                messagesConfigured: captured.messagesConfigured,
+                isFloor: accuracy == .lowerBound,
+                monitoringIsActive: accuracy == .lowerBound && captured.monitoringIsActive,
+                updatedAt: captured.updatedAt
+            )
+        }
+        result.isFloor = accuracy == .lowerBound
+        return accuracy == .exact ? currentMacSnapshot(result, now: now) : result
+    }
+
+    /// Keep the outgoing day available to a scheduled midnight entry before
+    /// either platform tracker has had a chance to file it into history.
+    static func rolloverHistory(
+        snapshot: UsageSnapshot,
+        history: [DayRecord],
+        accuracy: WidgetAccuracy
+    ) -> [DayRecord] {
+        guard snapshot.distractionsConfigured || snapshot.messagesConfigured else { return history }
+        var record = DayRecord(snapshot: snapshot)
+        record.isFloor = accuracy == .lowerBound
+        return HistoryStore.canonicalized(history + [record])
     }
 
     private static func nextMidnight(

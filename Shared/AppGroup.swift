@@ -55,12 +55,16 @@ enum DayKey {
 
     /// Inverse of `today(_:)` — midnight local time for a stored day key.
     static func date(from dayKey: String) -> Date? {
+        guard dayKey.utf8.count == 10,
+              dayKey.utf8.allSatisfy({ (48...57).contains($0) || $0 == 45 }) else { return nil }
         let parts = dayKey.split(separator: "-")
         guard parts.count == 3,
-              let year = Int(parts[0]),
-              let month = Int(parts[1]),
-              let day = Int(parts[2]) else { return nil }
-        return calendar.date(from: DateComponents(year: year, month: month, day: day))
+              parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
+              (1...9999).contains(year), (1...12).contains(month), (1...31).contains(day),
+              let result = calendar.date(from: DateComponents(year: year, month: month, day: day)),
+              today(result) == dayKey else { return nil }
+        return result
     }
 
     /// A fresh calendar observes timezone changes while the app is running.

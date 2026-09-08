@@ -58,10 +58,10 @@ Shared/
   NudgeText.swift               All iPhone and Mac notification copy
   WidgetPresentation.swift     Tested exact/lower-bound widget semantics
   NoiseGateRoute.swift         Stable iPhone widget deep links
-  StreakStats.swift             Tested run/average/trend arithmetic
+  StreakStats.swift             Exact-record run/average/trend arithmetic
   DesignSystem.swift            Adaptive visual tokens
   AccentTheme.swift             User-selectable Distractions accent
-  BudgetGauge.swift             Shared accessible ring
+  BudgetGauge.swift             Accessible circular accessory gauge
 iOS/
   App/                          SwiftUI app: Today / Apps / Budgets
   App/Intents/                  App Intents and Shortcuts (floors only)
@@ -290,11 +290,10 @@ baseline, where it would be arithmetic rather than information.
 The Rhythm scenes are the only ones given an `.hourly()` segment filter; every
 other range uses `.daily()`, which is far cheaper for Screen Time to compute.
 
-Today and 7 Days both read `numberOfPickups` alongside the duration. A total
-answers "how long" and stops; pickups and the mean visit length say whether
-that total arrived as one sitting or as repeated checking, which is the
-observation worth surfacing. Keep both — and keep them descriptive. Reporting
-that a number is high is the product; suggesting what to do about it is not.
+Today and 7 Days both read `numberOfPickups` alongside duration. Apple defines
+this as pickups made directly to an application, not every app visit. Keep the
+pickup count. Do not divide total duration by it and label the result an average
+visit length. Report observations without prescribing what the owner should do.
 Rhythm buckets by hour of day and divides by the number of *distinct days
 observed*, so a single late night cannot read as a daily habit.
 
@@ -319,11 +318,31 @@ descriptor open for its lifetime, and `AccentTheme.current` reads
 history and snapshots into `@State` and refresh them on a timer instead of
 decoding inside `body`.
 
-Controls that can change continuously (the budget drag track) hold their live
-value in local `@State` and commit exactly once on release. Never persist or
-restart monitoring per drag event.
+Budgets use a native stepper and a menu of common targets. If a future control
+changes continuously, hold its live value in local `@State` and commit once on
+release. Never restart monitoring per drag event.
 
 ## Design rules
+
+- Signal uses an ivory chassis, dark ink instrument face, amber default
+  Distractions accent, teal Messages, condensed numerals, and calibrated
+  segmented meters. The owner rejected the generic soft-card/serif design.
+  Preserve a saved accent choice and use instrument-specific colors on the
+  dark face in both appearances. Other sections sit flat against fine rules.
+- Today shows a prominent Distractions instrument and a smaller Messages
+  readout. Do not restore a combined hero, duplicate
+  over-budget banner, or checkpoint-derived under-budget streaks. Keep the
+  legacy Combined report context registered for compatibility.
+- Native navigation occupies its own space below the content. No control may
+  require a hardcoded bottom spacer to clear an overlay.
+- Widgets retain `≥` and checkpoint percentages on iPhone. A zero checkpoint
+  is unknown, not a measured zero. Only circular accessories use a ring.
+- Schedule a deterministic midnight reset entry. Check Mac staleness from the
+  stored heartbeat when the provider runs. Never predict a missed heartbeat
+  in a future timeline entry.
+- `StreakStats` accepts exact records only. Missing calendar days break a run.
+- iPhone CSV export forces `at_least`, including legacy rows whose decoder
+  defaulted `isFloor` to false.
 
 - Use `NG.*` colors and `Font.ng*` typography.  Do not add raw view colors.
 - `NG.distraction` means Distractions and is user-selectable via

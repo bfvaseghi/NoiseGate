@@ -14,9 +14,9 @@ enum NoiseGateWidgetFocus: String, AppEnum {
     case distractions
     case messages
 
-    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Focus")
+    static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Widget view")
     static var caseDisplayRepresentations: [Self: DisplayRepresentation] = [
-        .automatic: "Automatic",
+        .automatic: "Both",
         .distractions: "Distractions",
         .messages: "Messages"
     ]
@@ -25,10 +25,10 @@ enum NoiseGateWidgetFocus: String, AppEnum {
 struct NoiseGateWidgetIntent: WidgetConfigurationIntent {
     static var title: LocalizedStringResource = "NoiseGate focus"
     static var description = IntentDescription(
-        "Choose which ledger the widget emphasizes."
+        "Show both ledgers or one."
     )
 
-    @Parameter(title: "Focus", default: .automatic)
+    @Parameter(title: "View", default: .automatic)
     var focus: NoiseGateWidgetFocus
 }
 
@@ -87,22 +87,46 @@ struct SnapshotProvider: AppIntentTimelineProvider {
         for configuration: NoiseGateWidgetIntent,
         in context: Context
     ) async -> Timeline<SnapshotEntry> {
-        let entry = makeEntry(
-            focus: configuration.focus,
-            includeHistory: context.family == .systemLarge
+        let now = Date()
+        let config = BudgetConfig.load()
+        let entry = makeEntry(focus: configuration.focus,
+                              includeHistory: context.family == .systemLarge,
+                              now: now, config: config)
+        let midnight = WidgetRefreshSchedule.midnightEntryDate(after: now)
+        let nextDay = SnapshotEntry(
+            date: midnight,
+            snapshot: WidgetRefreshSchedule.snapshotForDisplay(
+                entry.snapshot, config: config, accuracy: .lowerBound, now: midnight
+            ),
+            history: WidgetRefreshSchedule.rolloverHistory(
+                snapshot: entry.snapshot, history: entry.history, accuracy: .lowerBound
+            ),
+            focus: entry.focus
         )
-        let refresh = WidgetRefreshSchedule.iOSNextRefresh(now: .now)
-        return Timeline(entries: [entry], policy: .after(refresh))
+        let refresh = WidgetRefreshSchedule.iOSNextRefresh(now: now)
+        return Timeline(entries: [entry, nextDay], policy: .after(refresh))
     }
 
     private func makeEntry(
         focus: NoiseGateWidgetFocus,
-        includeHistory: Bool
+        includeHistory: Bool,
+        now: Date = Date(),
+        config: BudgetConfig = BudgetConfig.load()
     ) -> SnapshotEntry {
-        SnapshotEntry(
-            date: .now,
-            snapshot: UsageSnapshot.loadToday(),
-            history: includeHistory ? HistoryStore.load() : [],
+        let captured = SharedStore.shared.load(UsageSnapshot.self, forKey: StoreKey.usageSnapshot)
+            ?? UsageSnapshot()
+        var history = includeHistory ? HistoryStore.load() : []
+        if includeHistory && captured.dayKey != DayKey.today(now) {
+            history = WidgetRefreshSchedule.rolloverHistory(
+                snapshot: captured, history: history, accuracy: .lowerBound
+            )
+        }
+        return SnapshotEntry(
+            date: now,
+            snapshot: WidgetRefreshSchedule.snapshotForDisplay(
+                captured, config: config, accuracy: .lowerBound, now: now
+            ),
+            history: history,
             focus: focus
         )
     }

@@ -17,7 +17,7 @@ final class StreakStatsTests: XCTestCase {
             messagesMinutes: 0,
             distractionBudgetMinutes: budget,
             messagesBudgetMinutes: 60,
-            isFloor: true
+            isFloor: false
         )
     }
 

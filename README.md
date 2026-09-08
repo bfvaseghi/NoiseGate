@@ -44,18 +44,23 @@ are ever added.
 
 ## What ships
 
+Signal gives the tracker the visual character of a compact instrument: an
+ivory chassis, a dark Distractions face, condensed time numerals, and
+calibrated amber meters. Messages stays on a smaller teal readout. Apps and
+Budgets use flat, ruled sections. Saved accent choices still apply.
+
 | Target | Purpose |
 | --- | --- |
 | `NoiseGate` | iPhone and iPad app for Today, Apps, and Budgets |
 | `NoiseGateMonitor` | Screen Time thresholds, widget checkpoints, and nudges |
-| `NoiseGateReport` | Exact private usage reports and seven-day charts |
+| `NoiseGateReport` | Exact private usage reports, 7- and 30-day charts, and hourly patterns |
 | `NoiseGateWidget` | Home Screen and Lock Screen widgets |
 | `NoiseGateMac` | Idle-aware native menu-bar tracker |
 | `NoiseGateMacWidget` | Desktop and Notification Center widget |
 
 The widgets use a signal-first hierarchy: Distractions is primary, Messages is
 secondary, and no all-screen total appears. Long-press a widget and choose
-**Edit Widget** to emphasize Distractions or Messages. Automatic mode prefers
+**Edit Widget** to emphasize Distractions or Messages. Both mode prefers
 Distractions and falls back to Messages when that is the only configured
 ledger. iPhone includes small, medium, large, circular, rectangular, and inline
 Lock Screen layouts. Mac includes small, medium, and large layouts.
@@ -99,6 +104,19 @@ identifiers enter either ledger.
 Mac totals are exact for the tracker’s own observations.  Browser domains are
 not inspected.  Selecting a browser would count the browser as an app, so the
 recommended setup is to select only native distracting apps.
+
+## Signal interface
+
+Today shows Distractions and Messages as separate ledger cards. The range
+control switches between Today, 7 Days, 30 Days, and Rhythm. Apps holds the
+selection and pause controls. Budgets uses compact steppers and quick choices.
+The Mac offers the same separate totals and an optional weekend target.
+
+The iPhone home screen does not derive under-budget streaks from checkpoint
+minimums. Exports label every iPhone row `at_least`, including older records.
+Widgets schedule a midnight reset and preserve the outgoing day for their
+history display. The Mac checks the last stored heartbeat when it refreshes
+rather than predicting that a healthy tracker will stop in the future.
 
 ## Build
 

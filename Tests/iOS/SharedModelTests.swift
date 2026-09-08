@@ -635,7 +635,7 @@ final class SharedModelTests: XCTestCase {
                 now: noon,
                 calendar: calendar
             ).timeIntervalSince(noon),
-            36,
+            5 * 60,
             accuracy: 0.1
         )
 

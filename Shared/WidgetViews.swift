@@ -129,21 +129,12 @@ struct WidgetHeader: View {
 
 struct SignalProgressBar: View {
     let presentation: WidgetLedgerPresentation
-    var height: CGFloat = 8
+    var height: CGFloat = 10
 
     var body: some View {
-        let color = WidgetStyle.signalColor(presentation)
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(color.opacity(0.16))
-                if presentation.fraction > 0 {
-                    Capsule()
-                        .fill(color)
-                        .frame(width: max(height, geo.size.width * presentation.fraction))
-                }
-            }
-        }
-        .frame(height: height)
+        SignalSegments(fraction: presentation.isFloor
+                       ? min(1, Double(presentation.progressPercent) / 100) : presentation.fraction,
+                       tint: WidgetStyle.signalColor(presentation), height: height, count: 30)
         .accessibilityHidden(true)
     }
 }
@@ -233,7 +224,7 @@ struct WeekCrossingStrip: View {
                         track.fill(NG.line.opacity(0.5))
                         track.fill(tint)
                             .frame(height: max(5, geo.size.height * day.fraction))
-                    case .reached, .over:
+                    case .reached:
                         track.fill(NG.line.opacity(0.5))
                         track.fill(NG.alarm)
                             .frame(height: max(7, geo.size.height * max(0.6, day.fraction)))
@@ -246,141 +237,107 @@ struct WeekCrossingStrip: View {
 }
 
 // MARK: - Family layouts
-//
-// Sized so the tallest realistic content fits the smallest device in each
-// family. Every value carries a scale guard, because "≥7h 45m" is far wider
-// than the "≥36m" these layouts get mocked up with.
 
-/// Small: the ring is the whole point at this size, with one secondary line.
+struct WidgetLedgerBlock: View {
+    let presentation: WidgetLedgerPresentation
+    var valueSize: CGFloat = 36
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(presentation.ledger.title)
+                .font(.ngMono(11))
+                .foregroundStyle(WidgetStyle.ledgerColor(presentation.ledger))
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Text(presentation.valueText)
+                .font(.ngNumber(valueSize)).monospacedDigit()
+                .foregroundStyle(WidgetStyle.signalColor(presentation))
+                .lineLimit(1).minimumScaleFactor(0.5)
+            if presentation.isConfigured {
+                Text("Target · \(presentation.budgetMinutes.asHoursMinutes)")
+                    .font(.system(size: 10)).foregroundStyle(NG.inkSoft)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+            SignalProgressBar(presentation: presentation)
+            Text(WidgetStyle.status(presentation))
+                .font(.system(size: 10)).foregroundStyle(WidgetStyle.statusColor(presentation))
+                .lineLimit(1).minimumScaleFactor(0.65)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.ledger.title)
+        .accessibilityValue(presentation.accessibilityValue
+            + (presentation.monitoringIsActive ? "" : ", tracking paused"))
+    }
+}
+
 struct SmallSignalLayout: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
 
     var body: some View {
-        VStack(spacing: 8) {
-            WidgetHeader(presentation: primary)
-            SignalRing(presentation: primary, size: 78)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(primary.ledger.title)
+                .font(.ngMono(11))
+                .foregroundStyle(WidgetStyle.ledgerColor(primary.ledger))
+            Text(primary.valueText)
+                .font(.ngNumber(30)).monospacedDigit()
+                .foregroundStyle(WidgetStyle.signalColor(primary))
+                .lineLimit(1).minimumScaleFactor(0.5)
+            Text(primary.isConfigured ? "Target · \(primary.budgetMinutes.asHoursMinutes)" : "Choose apps")
+                .font(.system(size: 10)).foregroundStyle(NG.inkSoft)
+                .lineLimit(1).minimumScaleFactor(0.75)
+            SignalProgressBar(presentation: primary)
             Text(WidgetStyle.status(primary))
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(WidgetStyle.statusColor(primary))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .font(.system(size: 10)).foregroundStyle(NG.inkSoft)
+                .lineLimit(1).minimumScaleFactor(0.65)
             if let secondary {
                 SecondaryLedgerRow(presentation: secondary)
             }
         }
-        .accessibilityElement(children: .contain)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(primary.ledger.title)
+        .accessibilityValue(primary.accessibilityValue
+            + (primary.monitoringIsActive ? "" : ", tracking paused")
+            + (secondary.map { ". \($0.ledger.title): \($0.accessibilityValue)" } ?? ""))
     }
 }
 
-/// Medium: primary ring beside a secondary ring, with the status text under
-/// each. Two rings read as one system; a ring plus a bar did not.
 struct MediumSignalLayout: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             WidgetHeader(presentation: primary)
-            HStack(spacing: 16) {
-                ledgerColumn(primary, ringSize: 78, emphasised: true)
+            HStack(alignment: .top, spacing: 16) {
+                WidgetLedgerBlock(presentation: primary, valueSize: 32)
                 if let secondary {
-                    Rectangle()
-                        .fill(NG.line)
-                        .frame(width: 1)
-                        .accessibilityHidden(true)
-                    ledgerColumn(secondary, ringSize: 78, emphasised: false)
-                } else {
-                    Rectangle()
-                        .fill(NG.line)
-                        .frame(width: 1)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Everything else")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(NG.ink)
-                        Text("stays untracked.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(NG.inkSoft)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Rectangle().fill(NG.line).frame(width: 1).accessibilityHidden(true)
+                    WidgetLedgerBlock(presentation: secondary, valueSize: 32)
                 }
             }
         }
-        .accessibilityElement(children: .contain)
-    }
-
-    private func ledgerColumn(
-        _ presentation: WidgetLedgerPresentation,
-        ringSize: CGFloat,
-        emphasised: Bool
-    ) -> some View {
-        VStack(spacing: 6) {
-            SignalRing(presentation: presentation, size: ringSize)
-            Text(presentation.ledger.title.uppercased())
-                .font(.ngLabel(emphasised ? 10 : 9.5))
-                .tracking(1.5)
-                .foregroundStyle(NG.inkSoft)
-                .lineLimit(1)
-            Text(WidgetStyle.status(presentation))
-                .font(.system(size: emphasised ? 11 : 10.5, weight: .semibold))
-                .foregroundStyle(WidgetStyle.statusColor(presentation))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-        }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
-/// Large: both rings plus the seven-day strip. One explanatory line, not three.
 struct LargeSignalLayout: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
     let summary: WidgetWeekSummary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
             WidgetHeader(presentation: primary)
-
-            HStack(spacing: 18) {
-                VStack(spacing: 6) {
-                    SignalRing(presentation: primary, size: 104)
-                    Text(primary.ledger.title.uppercased())
-                        .font(.ngLabel(10))
-                        .tracking(1.6)
-                        .foregroundStyle(NG.inkSoft)
-                }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(WidgetStyle.status(primary))
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(WidgetStyle.statusColor(primary))
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.75)
-                    if let secondary {
-                        Divider()
-                        SecondaryLedgerRow(presentation: secondary)
-                        Text(WidgetStyle.status(secondary))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(NG.inkSoft)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            WidgetLedgerBlock(presentation: primary, valueSize: 44)
+            if let secondary {
+                Divider()
+                SecondaryLedgerRow(presentation: secondary)
             }
-
             Spacer(minLength: 0)
-            Divider()
-
             WeekCrossingStrip(summary: summary, ledger: primary.ledger)
-
-            Spacer(minLength: 0)
-            Text("Only selected apps are counted. Nothing is blocked.")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
         }
-        .accessibilityElement(children: .contain)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

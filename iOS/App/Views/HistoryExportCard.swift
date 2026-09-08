@@ -16,9 +16,7 @@ struct HistoryCSV: Transferable {
     }
 }
 
-/// Export lives behind its own card because the caveat matters as much as the
-/// button: iPhone rows are floors, Mac rows are exact, and the file says which
-/// per row rather than leaving the reader to assume.
+/// Share a named CSV and identify checkpoint minimums before export.
 struct HistoryExportCard: View {
     /// Loaded off the view body — `SharedStore` takes a cross-process file
     /// lock, which has no business running during a render.
@@ -26,55 +24,36 @@ struct HistoryExportCard: View {
 
     private var csv: HistoryCSV {
         HistoryCSV(
-            text: HistoryExport.csv(records),
+            text: HistoryExport.csv(records, forceLowerBound: true),
             name: HistoryExport.filename()
         )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 38, height: 38)
-                    .background(
-                        NG.inkSoft,
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Export history")
-                        .font(.system(size: 15.5, weight: .bold))
-                        .foregroundStyle(NG.ink)
-                    Text(records.isEmpty
-                            ? "No finished days recorded yet."
-                            : "\(records.count) finished \(records.count == 1 ? "day" : "days") as CSV")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(NG.inkSoft)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Export history").font(.subheadline.weight(.medium))
+                    Text(records.isEmpty ? "No finished days yet" : "\(records.count) days · CSV")
+                        .font(.caption).foregroundStyle(NG.inkSoft)
                 }
                 Spacer()
                 if !records.isEmpty {
-                    ShareLink(
-                        item: csv,
-                        preview: SharePreview(HistoryExport.filename())
-                    ) {
-                        Text("Export")
-                            .font(.system(size: 13.5, weight: .bold))
-                            .foregroundStyle(NG.distraction)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 7)
-                            .background(NG.distraction.opacity(0.14), in: Capsule())
+                    ShareLink(item: csv, preview: SharePreview(HistoryExport.filename())) {
+                        Image(systemName: "square.and.arrow.up")
+                            .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.plain)
+                    .accessibilityLabel("Export history as CSV")
+                    .tint(NG.distraction)
                 }
             }
-
-            Text("Each row carries the budgets that applied that day, and whether its minutes are exact or a floor. iPhone records the highest checkpoint crossed, because exact Screen Time never leaves Apple's report extension.")
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(NG.inkSoft)
+            Text("iPhone exports contain checkpoint minimums.")
+                .font(.caption).foregroundStyle(NG.inkSoft)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .ngCard()
-        .task { records = HistoryStore.lastDays(HistoryStore.maxDays) }
+        .ngCard(padding: 17)
+        .task {
+            records = HistoryStore.lastDays(HistoryStore.maxDays)
+                .filter { $0.dayKey < DayKey.today() }
+        }
     }
 }

@@ -131,9 +131,14 @@ struct WidgetLedgerPresentation: Equatable {
             let amount = isFloor
                 ? "at least \(minutes.asHoursMinutes)"
                 : minutes.asHoursMinutes
-            let verdict = minutes >= budgetMinutes
-                ? " That is past today's \(budgetMinutes.asHoursMinutes) budget."
-                : ""
+            let verdict: String
+            if minutes > budgetMinutes {
+                verdict = " That is past today’s \(budgetMinutes.asHoursMinutes) budget."
+            } else if minutes == budgetMinutes {
+                verdict = " Today’s budget has been reached."
+            } else {
+                verdict = ""
+            }
             return "\(name): \(amount) today, against a "
                 + "\(budgetMinutes.asHoursMinutes) budget.\(verdict)"
         }
@@ -283,6 +288,7 @@ struct WidgetWeekSummary: Equatable {
     /// counts once a threshold actually fired. Mac values are exact, so there
     /// it states plainly how many days reached the budget.
     var summaryText: String {
+        guard days.contains(where: { $0.hasRecord }) else { return "No recorded days" }
         let isFloor = days.first?.isFloor ?? true
         if isFloor {
             switch reachedDayCount {
@@ -292,7 +298,7 @@ struct WidgetWeekSummary: Equatable {
             }
         }
         switch reachedDayCount {
-        case 0: return "Budget not reached"
+        case 0: return "No recorded crossings"
         case 1: return "Budget reached on 1 day"
         default: return "Budget reached on \(reachedDayCount) days"
         }
