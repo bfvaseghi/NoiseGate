@@ -629,15 +629,27 @@ final class SharedModelTests: XCTestCase {
             fresh,
             now: noon.addingTimeInterval(36)
         ).monitoringIsActive)
+        // Reloads are rationed: the safety net is five minutes (or midnight),
+        // and the heartbeat deadline is a scheduled timeline entry instead.
         XCTAssertEqual(
             WidgetRefreshSchedule.macNextRefresh(
                 snapshot: fresh,
                 now: noon,
                 calendar: calendar
             ).timeIntervalSince(noon),
+            5 * 60,
+            accuracy: 0.1
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(WidgetRefreshSchedule.macStaleEntryDate(snapshot: fresh, now: noon))
+                .timeIntervalSince(noon),
             36,
             accuracy: 0.1
         )
+        XCTAssertNil(WidgetRefreshSchedule.macStaleEntryDate(
+            snapshot: fresh,
+            now: noon.addingTimeInterval(40)
+        ))
 
         var stale = fresh
         stale.monitoringIsActive = false
