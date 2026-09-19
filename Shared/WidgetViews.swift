@@ -233,7 +233,7 @@ struct WeekCrossingStrip: View {
                         track.fill(NG.line.opacity(0.5))
                         track.fill(tint)
                             .frame(height: max(5, geo.size.height * day.fraction))
-                    case .reached, .over:
+                    case .reached:
                         track.fill(NG.line.opacity(0.5))
                         track.fill(NG.alarm)
                             .frame(height: max(7, geo.size.height * max(0.6, day.fraction)))
