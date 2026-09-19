@@ -268,7 +268,8 @@ struct TodayView: View {
     private func budgetLabel(_ minutes: Int) -> String {
         switch range {
         case .today: return "BUDGET \(minutes.asHoursMinutes)"
-        case .week: return "BUDGET \(minutes.asHoursMinutes)/DAY"
+        // 7 Days and 30 Days both chart daily bars against a per-day target.
+        case .week, .month: return "BUDGET \(minutes.asHoursMinutes)/DAY"
         case .rhythm: return "AVG PER DAY"
         }
     }
