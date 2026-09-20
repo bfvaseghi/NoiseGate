@@ -1,0 +1,78 @@
+name: Widget previews
+
+# Renders the iPhone widget at every family it supports, light and dark, on
+# an iPhone simulator (Tests/WidgetPreview draws the SwiftUI views with
+# ImageRenderer) and uploads the PNGs as an artifact, so the widget can be
+# looked at without a device. macOS minutes are billed at 10x on a private
+# repository, so this runs on demand and only when the widget itself changes.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/xcode-apps-ui-retention-ep2v4v]
+    paths:
+      - "iOS/Widget/**"
+      - Shared/WidgetViews.swift
+      - Shared/WidgetPresentation.swift
+      - Shared/DesignSystem.swift
+      - Shared/AccentTheme.swift
+      - "Tests/WidgetPreview/**"
+      - project.yml
+      - .github/workflows/widget-previews.yml
+
+jobs:
+  render:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # NoiseGate.xcodeproj is generated from project.yml and never committed.
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Pick a simulator
+        id: sim
+        run: |
+          sdk=$(xcrun --sdk iphonesimulator --show-sdk-version)
+          id=$(xcrun simctl list devices available --json | python3 Scripts/select_simulator.py --sdk-version "$sdk")
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices available | grep -F "$id"
+      - name: Render the widget
+        run: |
+          rm -rf previews.xcresult
+          status=0
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGateWidgetPreviews \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.id }}" \
+            -resultBundlePath "$GITHUB_WORKSPACE/previews.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            TEST_RUNNER_WIDGET_PREVIEW_DIR="$GITHUB_WORKSPACE/rendered" \
+            test > build.log 2>&1 || status=$?
+          grep -E "WIDGET_PREVIEWS|error:|Test Case|\*\* TEST|Testing failed" build.log || true
+          if [ "$status" -ne 0 ]; then echo "xcodebuild exited $status"; tail -n 60 build.log; exit "$status"; fi
+      - name: Collect the files
+        run: |
+          mkdir -p out exported
+          # The PNGs travel as test attachments in the result bundle; the
+          # manifest maps each exported file back to its widget name.
+          xcrun xcresulttool export attachments --path previews.xcresult --output-path exported
+          python3 - <<'PY'
+          import json, os, shutil
+          manifest = json.load(open("exported/manifest.json"))
+          count = 0
+          for test in manifest:
+              for att in test.get("attachments", []):
+                  name = att.get("suggestedHumanReadableName") or att["exportedFileName"]
+                  if not name.endswith(".png"): name += ".png"
+                  shutil.copy(os.path.join("exported", att["exportedFileName"]), os.path.join("out", name))
+                  count += 1
+          print("exported", count, "attachments")
+          PY
+          if ! ls out/*.png >/dev/null 2>&1; then
+            dir=$(grep -o 'WIDGET_PREVIEWS [0-9]* files in .*' build.log | tail -n 1 | sed 's/.* in //')
+            echo "no attachments exported; trying the folder the test named: $dir"
+            cp "$dir"/*.png out/ || true
+          fi
+          ls -la out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: widget-previews
+          path: out/*.png
+          if-no-files-found: error

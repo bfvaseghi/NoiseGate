@@ -24,10 +24,11 @@ TARGET_SUFFIXES = {
     "NoiseGateMacWidget": ".mac.widget",
     "NoiseGateTests": ".tests",
     "NoiseGateMacTests": ".mac.tests",
+    "NoiseGateWidgetPreviewTests": ".widget-previews",
 }
 
-# Every target that carries the App Group entitlement. The two test bundles
-# do not, which is why this is smaller than TARGET_SUFFIXES.
+# Every target that carries the App Group entitlement. The test bundles do
+# not, which is why this is smaller than TARGET_SUFFIXES.
 EXPECTED_APP_GROUP_ENTRIES = 6
 
 

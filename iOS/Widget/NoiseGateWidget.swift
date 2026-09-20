@@ -2,7 +2,12 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
+// Tests/WidgetPreview compiles this file into a test bundle with
+// WIDGET_PREVIEW defined so it can render the views; a test bundle must not
+// carry an entry point.
+#if !WIDGET_PREVIEW
 @main
+#endif
 struct NoiseGateWidgetBundle: WidgetBundle {
     var body: some Widget {
         NoiseGateWidget()
@@ -155,7 +160,7 @@ struct NoiseGateWidget: Widget {
             intent: NoiseGateWidgetIntent.self,
             provider: SnapshotProvider()
         ) { entry in
-            NoiseGateWidgetView(entry: entry)
+            NoiseGateWidgetEntryView(entry: entry)
                 .containerBackground(NG.paper, for: .widget)
                 .widgetURL(entry.destination.url)
         }
@@ -172,9 +177,25 @@ struct NoiseGateWidget: Widget {
     }
 }
 
-struct NoiseGateWidgetView: View {
+/// The view WidgetKit hosts. It reads the family from the environment and
+/// hands it to the layout as a value: `widgetFamily` is read-only, and the
+/// preview renderer in Tests/WidgetPreview has to draw every family outside
+/// WidgetKit.
+struct NoiseGateWidgetEntryView: View {
     @Environment(\.widgetFamily) private var family
     let entry: SnapshotEntry
+
+    var body: some View {
+        NoiseGateWidgetView(entry: entry, family: family)
+    }
+}
+
+struct NoiseGateWidgetView: View {
+    let entry: SnapshotEntry
+    let family: WidgetFamily
+    /// Anchors the seven-day strip. WidgetKit renders against the clock, as
+    /// before; the preview passes a fixed date so its output is repeatable.
+    var now: Date = Date()
 
     private var primary: WidgetLedgerPresentation {
         WidgetLedgerPresentation(
@@ -215,7 +236,8 @@ struct NoiseGateWidgetView: View {
                     snapshot: entry.snapshot,
                     history: entry.history,
                     ledger: entry.primaryLedger,
-                    accuracy: .lowerBound
+                    accuracy: .lowerBound,
+                    now: now
                 )
             )
         default:

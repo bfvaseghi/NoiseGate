@@ -45,6 +45,7 @@ target_suffixes = {
     "NoiseGateMacWidget": ".mac.widget",
     "NoiseGateTests": ".tests",
     "NoiseGateMacTests": ".mac.tests",
+    "NoiseGateWidgetPreviewTests": ".widget-previews",
 }
 target_bundle_ids = {}
 current_target = None

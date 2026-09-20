@@ -73,6 +73,7 @@ macOS/
   App/                          Menu-bar tracker and settings
   Widget/                       Mac widget
 Tests/                          Migration and ledger regression tests
+  WidgetPreview/                Renders the iPhone widget to PNGs, every family
 Scripts/validate_project.py     Cross-platform invariant audit
 Design/                         Vector reference and production icon renderer
 ```
@@ -91,6 +92,13 @@ Build the `NoiseGate` and `NoiseGateMac` schemes.  Run `NoiseGateTests` and
 
 `NoiseGate.xcodeproj` is generated and gitignored.  Never hand-edit or commit
 it.  Change `project.yml` instead.
+
+The `NoiseGateWidgetPreviews` scheme renders the iPhone widget at every
+family, light and dark, to PNGs; `.github/workflows/widget-previews.yml`
+uploads them so the widget can be reviewed without a device.  Its test bundle
+compiles the widget's sources with `WIDGET_PREVIEW`, which drops the `@main`
+bundle, and `Tests/WidgetPreview/WidgetPreviewCatalog.swift` supplies the fixed
+scenes.  `NoiseGateWidgetView` takes its `family` as a value for this reason.
 
 Keep the placeholders synchronized until the owner replaces them:
 
