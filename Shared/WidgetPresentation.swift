@@ -143,19 +143,33 @@ struct WidgetLedgerPresentation: Equatable {
         }
     }
 
-    /// The inline Lock Screen line: ledger, state and value, never more than
-    /// 27 characters.
+    /// The most characters the inline Lock Screen line carries. Beside its
+    /// glyph the line is about 234 pt wide on an iPhone 15/16 Pro, which the
+    /// system's inline face fills at roughly 25 characters; the system cuts
+    /// anything longer mid-word with an ellipsis, so a longer reading drops
+    /// its budget, then its value, and is never truncated.
+    static let inlineCharacterBudget = 24
+
+    /// The inline Lock Screen line: ledger, state and value.
     var inlineText: String {
         let name = ledger.title
+        let budget = budgetMinutes.asHoursMinutes
+        let candidates: [String]
         switch level {
         case .notConfigured:
             return "\(name) not set"
         case .waitingForCheckpoint:
-            return "\(name) · no checkpoint"
+            // The app's dash for "nothing measured yet" and the budget it is
+            // measured against; "no checkpoint" beside the ledger name runs
+            // past the line.
+            return "\(name) \(valueText) / \(budget)"
         default:
-            guard monitoringIsActive else { return "\(name) paused · \(valueText)" }
-            return "\(name) \(valueText) / \(budgetMinutes.asHoursMinutes)"
+            candidates = monitoringIsActive
+                ? ["\(name) \(valueText) / \(budget)", "\(name) \(valueText)"]
+                : ["\(name) paused \(valueText)", "\(name) paused"]
         }
+        return candidates.first { $0.count <= Self.inlineCharacterBudget }
+            ?? candidates[candidates.count - 1]
     }
 
     /// A full sentence for Siri and Shortcuts. It reads `isFloor` from the

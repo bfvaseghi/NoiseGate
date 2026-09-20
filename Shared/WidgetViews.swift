@@ -162,11 +162,20 @@ struct WidgetSystemContent {
 /// empty state never looks like a measured zero.
 struct SignalRing: View {
     let presentation: WidgetLedgerPresentation
+    /// The ring's visible diameter, which is also its layout frame.
     var size: CGFloat = 96
     var numeralSize: CGFloat = 22
     var showsBudgetInside: Bool = true
 
-    private var stroke: CGFloat { max(6, size * 0.105) }
+    /// `RingArc` strokes the circle inscribed in its frame, so half its
+    /// stroke paints outside that frame. The arc is drawn smaller so the
+    /// paint ends at `size` and the ring sits on the same margin as the text
+    /// beside it instead of spilling past it. Mirrors the arc's own stroke
+    /// rule, `max(6, arcSize × 0.105)`.
+    private var arcSize: CGFloat { min(size / 1.105, size - 6) }
+    private var stroke: CGFloat { max(6, arcSize * 0.105) }
+    /// From the frame edge to the ring's inner edge, plus 3 pt of air.
+    private var textInset: CGFloat { (size - arcSize + stroke) / 2 + 3 }
 
     private var isIndeterminate: Bool {
         presentation.level == .notConfigured
@@ -178,7 +187,7 @@ struct SignalRing: View {
             RingArc(
                 fraction: presentation.fraction,
                 color: WidgetStyle.signalColor(presentation),
-                size: size,
+                size: arcSize,
                 isIndeterminate: isIndeterminate,
                 sweep: .solid
             )
@@ -197,7 +206,7 @@ struct SignalRing: View {
                         .lineLimit(1)
                 }
             }
-            .padding(stroke + 3)
+            .padding(textInset)
         }
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
@@ -208,24 +217,36 @@ struct SignalRing: View {
 
 // MARK: - Building blocks
 
-/// Ledger name in small caps with the state glyph at the far end.
+/// Ledger name in small caps with the state glyph beside it, so the glyph
+/// reads as the label's own indicator rather than a dot adrift at the far
+/// edge of the column. The name never truncates: on a canvas too narrow for
+/// both, the glyph is dropped and the words still carry the state.
 struct LedgerEyebrow: View {
     let presentation: WidgetLedgerPresentation
+    /// 1.5 in the medium and large columns; the small canvas is 126 pt wide,
+    /// where "DISTRACTIONS" at 1.5 plus the glyph is a hair too wide.
+    var tracking: CGFloat = 1.5
+
+    private var title: some View {
+        Text(presentation.ledger.title.uppercased())
+            .font(.ngLabel(11))
+            .tracking(tracking)
+            .foregroundStyle(NG.inkSoft)
+            .lineLimit(1)
+            .accessibilityLabel(presentation.ledger.title)
+    }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text(presentation.ledger.title.uppercased())
-                .font(.ngLabel(11))
-                .tracking(1.5)
-                .foregroundStyle(NG.inkSoft)
-                .lineLimit(1)
-                .accessibilityLabel(presentation.ledger.title)
-            Spacer(minLength: 0)
-            Image(systemName: WidgetStyle.symbol(presentation))
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(WidgetStyle.signalColor(presentation))
-                .widgetAccentable()
-                .accessibilityHidden(true)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                title
+                Image(systemName: WidgetStyle.symbol(presentation))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(WidgetStyle.signalColor(presentation))
+                    .widgetAccentable()
+                    .accessibilityHidden(true)
+            }
+            title
         }
     }
 }
@@ -252,12 +273,44 @@ struct Hairline: View {
     }
 }
 
-/// Compact one-line reading of the non-focused ledger.
+/// Compact one-line reading of the non-focused ledger. The reading is tried
+/// at 12 pt, then at the 11 pt floor, then without its budget, so a number
+/// is never cut with an ellipsis: "≥1h 05m / 1h 00m" beside "Messages" only
+/// fits the 186 pt column at 11 pt, and beside "Distractions" not at all.
 struct SecondaryLedgerRow: View {
     let presentation: WidgetLedgerPresentation
 
+    private var hasNumber: Bool {
+        presentation.level != .notConfigured
+            && presentation.level != .waitingForCheckpoint
+    }
+
+    /// The last resort: the value alone, or the app's dash for a ledger with
+    /// no checkpoint yet. "Not set" is short enough to keep.
+    private var compactReading: String {
+        presentation.level == .notConfigured
+            ? presentation.valueAndBudgetText : presentation.valueText
+    }
+
     var body: some View {
-        HStack(spacing: 6) {
+        ViewThatFits(in: .horizontal) {
+            row(presentation.valueAndBudgetText, size: 12)
+            row(presentation.valueAndBudgetText, size: 11)
+            row(compactReading, size: 12)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(presentation.ledger.title)
+        .accessibilityValue(presentation.accessibilityValue)
+    }
+
+    /// Numerals in the number face; words ("Not set", "No checkpoint yet")
+    /// in the running-text face, which is narrower and is what they are.
+    private func readingFont(_ size: CGFloat) -> Font {
+        hasNumber ? Font.ngNumber(size) : Font.system(size: size, weight: .semibold)
+    }
+
+    private func row(_ reading: String, size: CGFloat) -> some View {
+        HStack(spacing: 0) {
             Circle()
                 .fill(WidgetStyle.signalColor(presentation))
                 .frame(width: 6, height: 6)
@@ -266,16 +319,14 @@ struct SecondaryLedgerRow: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(NG.inkSoft)
                 .lineLimit(1)
-            Spacer(minLength: 4)
-            Text(presentation.valueAndBudgetText)
-                .font(.ngNumber(12))
+                .padding(.leading, 6)
+            Text(reading)
+                .font(readingFont(size))
                 .foregroundStyle(WidgetStyle.signalColor(presentation))
                 .lineLimit(1)
-                .minimumScaleFactor(0.92)
+                .padding(.leading, 6)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(presentation.ledger.title)
-        .accessibilityValue(presentation.accessibilityValue)
     }
 }
 
@@ -344,8 +395,12 @@ struct WeekCrossingStrip: View {
                     }
                 }
             }
-            .frame(height: 48)
+            .frame(height: Self.height)
         }
+
+        /// Tall enough that the strip, not a blank band, holds the middle
+        /// of the 322 pt large canvas.
+        static let height: CGFloat = 64
     }
 }
 
@@ -357,13 +412,14 @@ struct WeekCrossingStrip: View {
 // "At least 1h 05m over budget", "12 days without a crossing".
 
 /// Small: the number. Eyebrow, ring with the value alone inside it, and one
-/// compact status line that names the budget the ring has no room for.
+/// compact status line that names the budget the ring has no room for; all
+/// three centred, one dial with its label above and its reading below.
 struct SmallSignalLayout: View {
     let primary: WidgetLedgerPresentation
 
     var body: some View {
         VStack(spacing: 5) {
-            LedgerEyebrow(presentation: primary)
+            LedgerEyebrow(presentation: primary, tracking: 1)
             SignalRing(
                 presentation: primary,
                 size: 84,
@@ -430,8 +486,10 @@ struct MediumSignalLayout: View {
     }
 }
 
-/// Large: masthead, the hero ring with a two-line status, the seven-day
-/// strip, and one sentence naming the device the numbers come from.
+/// Large: masthead, the hero ring with a status that may take two lines, the
+/// seven-day strip, and one sentence naming the device the numbers come
+/// from. Three fixed blocks; the two spacers share what is left of the 322 pt
+/// so the strip never floats in a blank band.
 struct LargeSignalLayout: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
@@ -475,8 +533,11 @@ struct LargeSignalLayout: View {
                 VStack(alignment: .leading, spacing: 4) {
                     VStack(alignment: .leading, spacing: 4) {
                         LedgerEyebrow(presentation: primary)
+                        // 16 pt: "At least 80% of budget" fits the 186 pt
+                        // column on one line, where 17 pt did not and was
+                        // shrunk to its floor. Longer readings wrap.
                         Text(WidgetStyle.status(primary))
-                            .font(.system(size: 17, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(WidgetStyle.statusColor(primary))
                             .lineLimit(2)
                             .minimumScaleFactor(0.75)
@@ -489,12 +550,14 @@ struct LargeSignalLayout: View {
                         Hairline()
                             .padding(.vertical, 3)
                         SecondaryLedgerRow(presentation: secondary)
-                    } else {
-                        Text(footer).modifier(DetailLine(lines: 2))
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // The outer stack shares its height out among its rows before the
+            // spacers claim the rest; without this the column is measured
+            // short and its status scales down instead of wrapping.
+            .fixedSize(horizontal: false, vertical: true)
 
             Hairline()
             Spacer(minLength: 0)
@@ -502,9 +565,7 @@ struct LargeSignalLayout: View {
             WeekCrossingStrip(summary: summary, ledger: primary.ledger)
 
             Spacer(minLength: 0)
-            if secondary != nil {
-                Text(footer).modifier(DetailLine(lines: 2))
-            }
+            Text(footer).modifier(DetailLine(lines: 2))
         }
         .accessibilityElement(children: .contain)
     }

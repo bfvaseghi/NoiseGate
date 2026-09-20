@@ -87,7 +87,9 @@ enum WidgetPreviewCatalog {
         )),
         // The widest strings: "≥7h 45m" of "8h 00m", Messages over at
         // "≥1h 05m / 1h 00m". Numerals scale but stay above 13.3 pt;
-        // "OF 8h 00m" fits at 11 pt; nothing clips.
+        // "OF 8h 00m" fits at 11 pt; the Messages row drops to its 11 pt
+        // floor rather than an ellipsis; the inline line is
+        // "Distractions ≥7h 45m"; nothing clips.
         scene("long-values", Fixture.entry(
             Fixture.snapshot(
                 distractions: 465,
@@ -95,6 +97,18 @@ enum WidgetPreviewCatalog {
                 distractionBudget: 480,
                 messagesBudget: 60
             )
+        )),
+        // The same values with the Messages focus: "≥7h 45m / 8h 00m" does
+        // not fit beside "Distractions" at any legible size, so the row shows
+        // the value alone; the inline line is "Messages ≥1h 05m".
+        scene("long-values-messages-focus", Fixture.entry(
+            Fixture.snapshot(
+                distractions: 465,
+                messages: 65,
+                distractionBudget: 480,
+                messagesBudget: 60
+            ),
+            focus: .messages
         )),
         // Yesterday reached its budget: "Crossed yesterday".
         scene("crossed-yesterday", Fixture.entry(
@@ -109,7 +123,8 @@ enum WidgetPreviewCatalog {
         )),
         // After midnight, before the first monitor callback: zero minutes
         // with yesterday's write time. "—", "No checkpoint yet", no clock,
-        // masthead right hidden.
+        // masthead right hidden; the Messages row says "No checkpoint yet"
+        // in running text, the inline line "Distractions — / 45m".
         scene("after-midnight", Fixture.entry(
             Fixture.snapshot(distractions: 0, messages: 0, updatedAt: Fixture.lateYesterday)
         )),

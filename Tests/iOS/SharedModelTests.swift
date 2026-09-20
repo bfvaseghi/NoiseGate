@@ -727,10 +727,36 @@ final class SharedModelTests: XCTestCase {
         XCTAssertEqual(presentation(minutes: 36).inlineText, "Distractions ≥36m / 45m")
         XCTAssertEqual(presentation(.messages, minutes: 20, budget: 60).inlineText, "Messages ≥20m / 1h 00m")
         XCTAssertEqual(presentation(minutes: 0, configured: false).inlineText, "Distractions not set")
-        XCTAssertEqual(presentation(minutes: 0).inlineText, "Distractions · no checkpoint")
-        XCTAssertEqual(presentation(minutes: 0, active: false).inlineText, "Distractions · no checkpoint")
-        XCTAssertEqual(presentation(minutes: 36, active: false).inlineText, "Distractions paused · ≥36m")
+        XCTAssertEqual(presentation(minutes: 0).inlineText, "Distractions — / 45m")
+        XCTAssertEqual(presentation(minutes: 0, active: false).inlineText, "Distractions — / 45m")
+        XCTAssertEqual(presentation(minutes: 36, active: false).inlineText, "Distractions paused ≥36m")
         XCTAssertEqual(presentation(minutes: 36, accuracy: .exact).inlineText, "Distractions 36m / 45m")
+    }
+
+    /// The system truncates an inline line mid-word; a reading that would
+    /// overrun the line loses its budget, then its value, and keeps its floor.
+    func testInlineTextDropsTheBudgetBeforeItWouldTruncate() {
+        XCTAssertEqual(presentation(minutes: 65, budget: 60).inlineText, "Distractions ≥1h 05m")
+        XCTAssertEqual(presentation(.messages, minutes: 65, budget: 60).inlineText, "Messages ≥1h 05m")
+        XCTAssertEqual(presentation(minutes: 40, budget: 75).inlineText, "Distractions ≥40m")
+        XCTAssertEqual(presentation(minutes: 65, budget: 60, active: false).inlineText, "Distractions paused")
+        XCTAssertEqual(presentation(minutes: 0, budget: 75).inlineText, "Distractions — / 1h 15m")
+
+        let widest = [
+            presentation(minutes: 36),
+            presentation(minutes: 36, active: false),
+            presentation(minutes: 0, budget: 75),
+            presentation(minutes: 465, budget: 480),
+            presentation(.messages, minutes: 65, budget: 60, active: false),
+            presentation(.messages, minutes: 0, configured: false)
+        ]
+        for candidate in widest {
+            XCTAssertLessThanOrEqual(
+                candidate.inlineText.count,
+                WidgetLedgerPresentation.inlineCharacterBudget,
+                candidate.inlineText
+            )
+        }
     }
 
     func testWidgetSymbolShowsPauseAheadOfTheLevel() {
