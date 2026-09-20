@@ -49,8 +49,9 @@ enum WidgetPreviewCatalog {
 
     static let scenes: [(name: String, view: (WidgetFamily) -> AnyView)] = [
         // ≥36m of 45m and ≥20m of 1h: "At least 80% of budget", "3 days
-        // without a crossing" (the 45 four days back stops the walk),
-        // "Updated 1:42 PM", strip "1 confirmed crossing".
+        // without a crossing" (the 45 four days back stops the walk), the
+        // "1:42 PM" stamp beside the ledger name, strip "1 confirmed
+        // crossing" with a paper dot on the crossed day.
         scene("typical-weekday", Fixture.entry(
             Fixture.snapshot(distractions: 36, messages: 20)
         )),
@@ -75,7 +76,7 @@ enum WidgetPreviewCatalog {
             history: []
         )),
         // The monitor is stopped: ring still amber (the floor is still true),
-        // "Tracking paused", pause glyph, "Updated 1:42 PM".
+        // "Tracking paused" led by the pause glyph, "1:42 PM" stamp kept.
         scene("tracking-paused", Fixture.entry(
             Fixture.snapshot(distractions: 36, messages: 20, active: false)
         )),
@@ -122,7 +123,7 @@ enum WidgetPreviewCatalog {
             history: Fixture.history([18, 32, 45, 22], endingDaysAgo: 3)
         )),
         // After midnight, before the first monitor callback: zero minutes
-        // with yesterday's write time. "—", "No checkpoint yet", no clock,
+        // with yesterday's write time. "—", "No checkpoint yet", no stamp,
         // masthead right hidden; the Messages row says "No checkpoint yet"
         // in running text, the inline line "Distractions — / 45m".
         scene("after-midnight", Fixture.entry(

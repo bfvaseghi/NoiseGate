@@ -429,11 +429,11 @@ struct WidgetStreakLine: Equatable {
 }
 
 /// The "when" beside the number. On iPhone it is the snapshot's own write
-/// time — "Updated", not "Checkpoint", because a budget or selection save
-/// bumps `updatedAt` too — shown only while the snapshot is today's and holds
-/// a checkpoint. On the Mac the tracker heartbeats every 30 s, so a write
-/// time says nothing; the line says whether the tracker is live and, when it
-/// is not, when it last was.
+/// time — a stamp at the eyebrow's trailing edge rather than "Checkpoint",
+/// because a budget or selection save bumps `updatedAt` too — shown only
+/// while the snapshot is today's and holds a checkpoint. On the Mac the
+/// tracker heartbeats every 30 s, so a write time says nothing; a sentence
+/// says whether the tracker is live and, when it is not, when it last was.
 enum WidgetClockLine {
     /// The shortened local time of the last write, or nil when no time may
     /// be shown for this platform and state.
@@ -464,7 +464,28 @@ enum WidgetClockLine {
         }
     }
 
-    /// The running-text line for the medium column.
+    /// The stamp at the trailing edge of the medium's eyebrow row: the write
+    /// time alone, iPhone only. A bare time in that corner is the Lock
+    /// Screen's own "as of" idiom; the Mac says live or paused in words.
+    static func stamp(
+        snapshot: UsageSnapshot,
+        ledger: WidgetLedger,
+        accuracy: WidgetAccuracy,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> String? {
+        guard accuracy == .lowerBound else { return nil }
+        return time(
+            snapshot: snapshot,
+            ledger: ledger,
+            accuracy: accuracy,
+            now: now,
+            calendar: calendar
+        )
+    }
+
+    /// The running-text line for the medium column, Mac only: whether the
+    /// tracker is live and, when it is not, when it last was.
     static func text(
         snapshot: UsageSnapshot,
         ledger: WidgetLedger,
@@ -472,18 +493,18 @@ enum WidgetClockLine {
         now: Date = Date(),
         calendar: Calendar = .autoupdatingCurrent
     ) -> String? {
-        let time = time(
-            snapshot: snapshot,
-            ledger: ledger,
-            accuracy: accuracy,
-            now: now,
-            calendar: calendar
-        )
         switch accuracy {
         case .lowerBound:
-            return time.map { "Updated \($0)" }
+            return nil
         case .exact:
             guard !snapshot.monitoringIsActive else { return "Tracking on this Mac" }
+            let time = time(
+                snapshot: snapshot,
+                ledger: ledger,
+                accuracy: accuracy,
+                now: now,
+                calendar: calendar
+            )
             return time.map { "Paused on this Mac · \($0)" } ?? "Paused on this Mac"
         }
     }

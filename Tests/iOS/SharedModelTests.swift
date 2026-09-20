@@ -759,13 +759,21 @@ final class SharedModelTests: XCTestCase {
         }
     }
 
-    func testWidgetSymbolShowsPauseAheadOfTheLevel() {
+    /// A glyph marks only what the ring cannot show: a stopped monitor
+    /// (ahead of the level), a reached or exceeded budget, and a ledger
+    /// with no selection. A plain level is the sweep itself.
+    func testWidgetSymbolMarksOnlyStatesTheRingCannotShow() {
         XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 36, active: false)), "pause.circle")
         XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 68, active: false)), "pause.circle")
         XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 0, configured: false, active: false)), "circle.dotted")
-        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 36)), "circle.fill")
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 0, configured: false)), "circle.dotted")
         XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 45)), "flag.fill")
         XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 68)), "exclamationmark.circle.fill")
+        XCTAssertNil(WidgetStyle.symbol(presentation(minutes: 0)))
+        XCTAssertNil(WidgetStyle.symbol(presentation(minutes: 10)))
+        XCTAssertNil(WidgetStyle.symbol(presentation(minutes: 25)))
+        XCTAssertNil(WidgetStyle.symbol(presentation(minutes: 36)))
+        XCTAssertNil(WidgetStyle.symbol(presentation(minutes: 36, accuracy: .exact)))
     }
 
     // MARK: - Widget streak and clock lines
@@ -918,8 +926,8 @@ final class SharedModelTests: XCTestCase {
         let calendar = try newYork()
         let now = try mondayNoon(calendar)
         let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: now))
-        func clock(_ snapshot: UsageSnapshot) -> String? {
-            WidgetClockLine.text(
+        func stamp(_ snapshot: UsageSnapshot) -> String? {
+            WidgetClockLine.stamp(
                 snapshot: snapshot,
                 ledger: .distractions,
                 accuracy: .lowerBound,
@@ -928,10 +936,10 @@ final class SharedModelTests: XCTestCase {
             )
         }
 
-        XCTAssertNil(clock(todaySnapshot(distractions: 36, updatedAt: yesterday)))
-        XCTAssertNil(clock(todaySnapshot(distractions: 0, updatedAt: now)))
-        XCTAssertNil(clock(todaySnapshot(distractions: 36, configured: false, updatedAt: now)))
-        XCTAssertNil(clock(todaySnapshot(distractions: 36, dayKey: "2026-08-23", updatedAt: now)))
+        XCTAssertNil(stamp(todaySnapshot(distractions: 36, updatedAt: yesterday)))
+        XCTAssertNil(stamp(todaySnapshot(distractions: 0, updatedAt: now)))
+        XCTAssertNil(stamp(todaySnapshot(distractions: 36, configured: false, updatedAt: now)))
+        XCTAssertNil(stamp(todaySnapshot(distractions: 36, dayKey: "2026-08-23", updatedAt: now)))
         XCTAssertNil(WidgetClockLine.masthead(
             snapshot: todaySnapshot(distractions: 36, updatedAt: yesterday),
             ledger: .distractions,
@@ -941,6 +949,9 @@ final class SharedModelTests: XCTestCase {
         ))
     }
 
+    /// The iPhone's time is a stamp beside the ledger name and a dateline in
+    /// the large masthead, never a sentence: the running-text line belongs
+    /// to the Mac tracker.
     func testWidgetClockLineShowsTodaysWriteTimeOnIPhone() throws {
         let calendar = try newYork()
         let now = try mondayNoon(calendar)
@@ -953,8 +964,11 @@ final class SharedModelTests: XCTestCase {
             time
         )
         XCTAssertEqual(
-            WidgetClockLine.text(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar),
-            "Updated \(time)"
+            WidgetClockLine.stamp(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar),
+            time
+        )
+        XCTAssertNil(
+            WidgetClockLine.text(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar)
         )
         XCTAssertEqual(
             WidgetClockLine.masthead(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar),
@@ -962,14 +976,14 @@ final class SharedModelTests: XCTestCase {
         )
         // A stopped monitor keeps its last write time: the floor is still true.
         XCTAssertEqual(
-            WidgetClockLine.text(
+            WidgetClockLine.stamp(
                 snapshot: todaySnapshot(distractions: 36, active: false, updatedAt: writtenAt),
                 ledger: .distractions,
                 accuracy: .lowerBound,
                 now: now,
                 calendar: calendar
             ),
-            "Updated \(time)"
+            time
         )
     }
 
@@ -979,7 +993,7 @@ final class SharedModelTests: XCTestCase {
         let heartbeat = now.addingTimeInterval(-50)
         let time = heartbeat.formatted(date: .omitted, time: .shortened)
         let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: now))
-        func line(active: Bool, updatedAt: Date) -> (text: String?, masthead: String?, time: String?) {
+        func line(active: Bool, updatedAt: Date) -> (text: String?, masthead: String?, time: String?, stamp: String?) {
             let snapshot = UsageSnapshot(
                 dayKey: "2026-08-24",
                 distractionMinutes: 36,
@@ -992,7 +1006,8 @@ final class SharedModelTests: XCTestCase {
             return (
                 WidgetClockLine.text(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar),
                 WidgetClockLine.masthead(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar),
-                WidgetClockLine.time(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar)
+                WidgetClockLine.time(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar),
+                WidgetClockLine.stamp(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar)
             )
         }
 
@@ -1000,16 +1015,21 @@ final class SharedModelTests: XCTestCase {
         XCTAssertEqual(live.text, "Tracking on this Mac")
         XCTAssertEqual(live.masthead, "THIS MAC · LIVE")
         XCTAssertNil(live.time)
+        XCTAssertNil(live.stamp)
 
         let paused = line(active: false, updatedAt: heartbeat)
         XCTAssertEqual(paused.text, "Paused on this Mac · \(time)")
         XCTAssertEqual(paused.masthead, "THIS MAC · PAUSED \(time)")
         XCTAssertEqual(paused.time, time)
+        // The heartbeat time is inside the sentence; a bare stamp beside the
+        // ledger name would read as an iPhone write time.
+        XCTAssertNil(paused.stamp)
 
         let stale = line(active: false, updatedAt: yesterday)
         XCTAssertEqual(stale.text, "Paused on this Mac")
         XCTAssertEqual(stale.masthead, "THIS MAC · PAUSED")
         XCTAssertNil(stale.time)
+        XCTAssertNil(stale.stamp)
     }
 
     // MARK: - Weekend budgets

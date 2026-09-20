@@ -239,10 +239,14 @@ struct NoiseGateWidgetView: View {
                 )
             )
         case .accessoryInline:
-            Label {
+            if let symbol = WidgetStyle.symbol(content.primary) {
+                Label {
+                    Text(content.primary.inlineText)
+                } icon: {
+                    Image(systemName: symbol)
+                }
+            } else {
                 Text(content.primary.inlineText)
-            } icon: {
-                Image(systemName: WidgetStyle.symbol(content.primary))
             }
         case .systemSmall:
             SmallSignalLayout(content: content)
@@ -265,7 +269,8 @@ struct NoiseGateWidgetView: View {
 
 /// The system gauge, which handles vibrant, accented and StandBy rendering
 /// itself. The value inside is hours-only past an hour so the digits never
-/// fall under 11 pt.
+/// fall under 11 pt. The label slot under the arc holds a glyph only when
+/// the arc cannot say it (paused, reached, over, not set up).
 private struct AccessoryCircle: View {
     let presentation: WidgetLedgerPresentation
 
@@ -273,7 +278,9 @@ private struct AccessoryCircle: View {
         ZStack {
             AccessoryWidgetBackground()
             Gauge(value: presentation.fraction) {
-                Image(systemName: WidgetStyle.symbol(presentation))
+                if let symbol = WidgetStyle.symbol(presentation) {
+                    Image(systemName: symbol)
+                }
             } currentValueLabel: {
                 Text(presentation.compactValueText)
                     .font(.ngNumber(14))
@@ -291,7 +298,8 @@ private struct AccessoryCircle: View {
 }
 
 /// Eyebrow with the hour, the number with its budget on one baseline, and
-/// the status: the number is the point, so it gets the weight.
+/// the status, led by its glyph in the states the number cannot show: the
+/// number is the point, so it gets the weight.
 private struct AccessoryRectangle: View {
     let primary: WidgetLedgerPresentation
     let time: String?
@@ -308,9 +316,7 @@ private struct AccessoryRectangle: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: WidgetStyle.symbol(primary))
-                    .font(.system(size: 11, weight: .bold))
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(primary.ledger.title.uppercased())
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(1)
@@ -318,7 +324,7 @@ private struct AccessoryRectangle: View {
                 Spacer(minLength: 0)
                 if let time {
                     Text(time)
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: .medium))
                         .lineLimit(1)
                 }
             }
@@ -332,10 +338,16 @@ private struct AccessoryRectangle: View {
                     .lineLimit(1)
             }
             .widgetAccentable()
-            Text(statusText)
-                .font(.system(size: 12, weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.92)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                if let symbol = WidgetStyle.symbol(primary) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .bold))
+                }
+                Text(statusText)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.92)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(primary.ledger.title)

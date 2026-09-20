@@ -28,11 +28,13 @@ enum WidgetStyle {
         }
     }
 
-    /// The numeral is ink, not the ledger colour: amber on paper is 2.9:1.
+    /// The numeral is ink, never the ledger colour (amber on paper is 2.9:1)
+    /// and not red either: the ring and the status carry a reached budget,
+    /// as the in-app gauge does, so the one meaning red has is not spent
+    /// four times on one canvas. Only an empty reading goes soft.
     static func numeralColor(_ presentation: WidgetLedgerPresentation) -> Color {
         switch presentation.level {
         case .notConfigured, .waitingForCheckpoint: return NG.inkSoft
-        case .reached, .over: return NG.alarm
         default: return NG.ink
         }
     }
@@ -60,22 +62,24 @@ enum WidgetStyle {
         }
     }
 
-    /// A distinct glyph per state, so state survives tinted and monochrome
-    /// home screens, StandBy, and colour-blind viewing — none of which
-    /// preserve the orange/teal/red encoding. A stopped monitor comes first:
-    /// the level is still a fact, but it is no longer moving.
-    static func symbol(_ presentation: WidgetLedgerPresentation) -> String {
+    /// A glyph only for the states the ring cannot show on its own, so the
+    /// state survives tinted and monochrome home screens, StandBy and
+    /// colour-blind viewing without a decoration beside every label. A
+    /// stopped monitor comes first: the level is still a fact, but it is no
+    /// longer moving. A reached budget is a full ring, which at 150 % looks
+    /// the same as at 100 %; the flag and the exclamation tell them apart.
+    /// An unconfigured ledger is dotted, so the Lock Screen circle, which
+    /// has no words, can still say "not set up" rather than "nothing yet".
+    /// Every other level is the sweep itself, and needs no second mark.
+    static func symbol(_ presentation: WidgetLedgerPresentation) -> String? {
         if presentation.isConfigured && !presentation.monitoringIsActive {
             return "pause.circle"
         }
         switch presentation.level {
         case .notConfigured: return "circle.dotted"
-        case .waitingForCheckpoint: return "circle"
-        case .clear: return "circle.bottomhalf.filled"
-        case .watch: return "circle.lefthalf.filled"
-        case .high: return "circle.fill"
         case .reached: return "flag.fill"
         case .over: return "exclamationmark.circle.fill"
+        case .waitingForCheckpoint, .clear, .watch, .high: return nil
         }
     }
 
@@ -96,6 +100,11 @@ struct WidgetSystemContent {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
     let streak: WidgetStreakLine
+    /// The write time alone, for the trailing edge of the eyebrow row.
+    /// iPhone only: on the Mac a heartbeat time says nothing.
+    let stamp: String?
+    /// The running-text line about the tracker. Mac only: "Tracking on this
+    /// Mac" or when it last was.
     let clock: String?
     let masthead: String?
     let summary: WidgetWeekSummary
@@ -124,6 +133,13 @@ struct WidgetSystemContent {
         streak = WidgetStreakLine(
             snapshot: snapshot,
             history: history,
+            ledger: primaryLedger,
+            accuracy: accuracy,
+            now: now,
+            calendar: calendar
+        )
+        stamp = WidgetClockLine.stamp(
+            snapshot: snapshot,
             ledger: primaryLedger,
             accuracy: accuracy,
             now: now,
@@ -217,14 +233,15 @@ struct SignalRing: View {
 
 // MARK: - Building blocks
 
-/// Ledger name in small caps with the state glyph beside it, so the glyph
-/// reads as the label's own indicator rather than a dot adrift at the far
-/// edge of the column. The name never truncates: on a canvas too narrow for
-/// both, the glyph is dropped and the words still carry the state.
+/// Ledger name in small caps. In the medium column the write time sits at
+/// the row's trailing edge as a stamp — the quietest honest form of
+/// "as of" — at label size but in running weight, so the name stays the
+/// louder of the two. The name never truncates.
 struct LedgerEyebrow: View {
     let presentation: WidgetLedgerPresentation
+    var stamp: String? = nil
     /// 1.5 in the medium and large columns; the small canvas is 126 pt wide,
-    /// where "DISTRACTIONS" at 1.5 plus the glyph is a hair too wide.
+    /// where "DISTRACTIONS" at 1.5 is a hair too wide.
     var tracking: CGFloat = 1.5
 
     private var title: some View {
@@ -237,17 +254,48 @@ struct LedgerEyebrow: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 6) {
+        if let stamp {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 title
-                Image(systemName: WidgetStyle.symbol(presentation))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(WidgetStyle.signalColor(presentation))
-                    .widgetAccentable()
-                    .accessibilityHidden(true)
+                Spacer(minLength: 0)
+                Text(stamp)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(NG.inkSoft)
+                    .lineLimit(1)
+                    .accessibilityLabel("Updated \(stamp)")
             }
+        } else {
             title
         }
+    }
+}
+
+/// The state in words, led by its glyph in the states where the ring alone
+/// could mislead (`WidgetStyle.symbol`). The glyph sits on the first
+/// baseline, so a two-line reading wraps under its own words; VoiceOver
+/// hears the words only.
+struct StatusLine: View {
+    let presentation: WidgetLedgerPresentation
+    let text: String
+    let size: CGFloat
+    let weight: Font.Weight
+    let color: Color
+    var lines: Int = 1
+    var minimumScale: CGFloat = 0.8
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            if let symbol = WidgetStyle.symbol(presentation) {
+                Image(systemName: symbol)
+                    .font(.system(size: size - 2, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            Text(text)
+                .font(.system(size: size, weight: weight))
+                .lineLimit(lines)
+                .minimumScaleFactor(minimumScale)
+        }
+        .foregroundStyle(color)
     }
 }
 
@@ -331,7 +379,10 @@ struct SecondaryLedgerRow: View {
 }
 
 /// Seven-day strip. A day with no record reads as an empty outline, a
-/// recorded zero as a flat baseline — the two must not look alike.
+/// recorded zero as a flat baseline — the two must not look alike. A
+/// confirmed crossing is red and carries a paper dot at its top: the ring's
+/// endpoint dot, set where the sweep met the budget, so the day is marked
+/// for a reader who cannot tell red from amber.
 struct WeekCrossingStrip: View {
     let summary: WidgetWeekSummary
     let ledger: WidgetLedger
@@ -343,10 +394,11 @@ struct WeekCrossingStrip: View {
                 .tracking(1.5)
                 .foregroundStyle(NG.inkSoft)
                 .lineLimit(1)
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(summary.days) { day in
                     VStack(spacing: 4) {
                         DayColumn(day: day, tint: WidgetStyle.ledgerColor(ledger))
+                            .frame(maxWidth: DayColumn.width)
                         Text(Self.weekdayLabel(day.date))
                             .font(.ngLabel(11))
                             .foregroundStyle(day.isToday ? NG.ink : NG.inkSoft)
@@ -392,15 +444,24 @@ struct WeekCrossingStrip: View {
                         track.fill(NG.line.opacity(0.5))
                         track.fill(NG.alarm)
                             .frame(height: max(7, geo.size.height * max(0.6, day.fraction)))
+                            .overlay(alignment: .top) {
+                                Circle()
+                                    .fill(NG.paper)
+                                    .frame(width: 5, height: 5)
+                                    .padding(.top, 5)
+                            }
                     }
                 }
             }
             .frame(height: Self.height)
         }
 
-        /// Tall enough that the strip, not a blank band, holds the middle
-        /// of the 322 pt large canvas.
-        static let height: CGFloat = 64
+        /// A bar, not a block: narrower than its column so the strip reads
+        /// as a chart under the hero ring rather than a wall of colour that
+        /// outweighs it, and short enough that the large canvas keeps an
+        /// even rhythm around it.
+        static let width: CGFloat = 30
+        static let height: CGFloat = 48
     }
 }
 
@@ -411,9 +472,9 @@ struct WeekCrossingStrip: View {
 // stays at or above 11 pt against the widest strings: "≥1h 05m", "OF 8h 00m",
 // "At least 1h 05m over budget", "12 days without a crossing".
 
-/// Small: the number. Eyebrow, ring with the value alone inside it, and one
-/// compact status line that names the budget the ring has no room for; all
-/// three centred, one dial with its label above and its reading below.
+/// Small: the number. A dial with its label above and its reading below,
+/// all three centred; the ring holds the value alone and the compact status
+/// names the budget the ring has no room for.
 struct SmallSignalLayout: View {
     let primary: WidgetLedgerPresentation
 
@@ -426,22 +487,27 @@ struct SmallSignalLayout: View {
                 numeralSize: 19,
                 showsBudgetInside: false
             )
-            Text(primary.compactSignalText)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(WidgetStyle.compactStatusColor(primary))
-                .lineLimit(1)
-                .minimumScaleFactor(0.92)
+            StatusLine(
+                presentation: primary,
+                text: primary.compactSignalText,
+                size: 12,
+                weight: .semibold,
+                color: WidgetStyle.compactStatusColor(primary),
+                minimumScale: 0.92
+            )
         }
         .accessibilityElement(children: .contain)
     }
 }
 
 /// Medium: the ring is the instrument, the column beside it is the ledger.
-/// Sized for a 306×126 canvas; the column never exceeds 102 pt tall.
+/// Sized for a 306×126 canvas; the column sits at 92 pt beside the 100 pt
+/// ring, or 112 pt on the Mac, whose tracker line is a sentence.
 struct MediumSignalLayout: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
     let streak: WidgetStreakLine
+    let stamp: String?
     let clock: String?
 
     var body: some View {
@@ -453,16 +519,19 @@ struct MediumSignalLayout: View {
                 showsBudgetInside: true
             )
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 // One VoiceOver stop for the ledger's own lines; the secondary
                 // row below keeps its own label and value.
-                VStack(alignment: .leading, spacing: 4) {
-                    LedgerEyebrow(presentation: primary)
-                    Text(WidgetStyle.status(primary))
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(WidgetStyle.statusColor(primary))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                VStack(alignment: .leading, spacing: 6) {
+                    LedgerEyebrow(presentation: primary, stamp: stamp)
+                    StatusLine(
+                        presentation: primary,
+                        text: WidgetStyle.status(primary),
+                        size: 15,
+                        weight: .bold,
+                        color: WidgetStyle.statusColor(primary),
+                        minimumScale: 0.8
+                    )
                     if let line = streak.text {
                         Text(line).modifier(DetailLine())
                     }
@@ -473,7 +542,7 @@ struct MediumSignalLayout: View {
                 .accessibilityElement(children: .combine)
                 if let secondary {
                     Hairline()
-                        .padding(.vertical, 3)
+                        .padding(.vertical, 4)
                     SecondaryLedgerRow(presentation: secondary)
                 } else {
                     Text("Only selected apps are counted. Nothing is blocked.")
@@ -488,8 +557,9 @@ struct MediumSignalLayout: View {
 
 /// Large: masthead, the hero ring with a status that may take two lines, the
 /// seven-day strip, and one sentence naming the device the numbers come
-/// from. Three fixed blocks; the two spacers share what is left of the 322 pt
-/// so the strip never floats in a blank band.
+/// from. The masthead hugs the hero; the three spacers share what is left of
+/// the 322 pt equally, so the rule, the strip and the footer keep one rhythm
+/// whether the status wraps or not.
 struct LargeSignalLayout: View {
     let primary: WidgetLedgerPresentation
     let secondary: WidgetLedgerPresentation?
@@ -503,7 +573,7 @@ struct LargeSignalLayout: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 // The app's own typographic mark: the brand word with a red
                 // full stop, the only brand red in any family.
@@ -523,24 +593,28 @@ struct LargeSignalLayout: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 16) {
+            HStack(alignment: .center, spacing: 16) {
                 SignalRing(
                     presentation: primary,
                     size: 104,
                     numeralSize: 24,
                     showsBudgetInside: true
                 )
-                VStack(alignment: .leading, spacing: 4) {
-                    VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {
                         LedgerEyebrow(presentation: primary)
                         // 16 pt: "At least 80% of budget" fits the 186 pt
                         // column on one line, where 17 pt did not and was
                         // shrunk to its floor. Longer readings wrap.
-                        Text(WidgetStyle.status(primary))
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(WidgetStyle.statusColor(primary))
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.75)
+                        StatusLine(
+                            presentation: primary,
+                            text: WidgetStyle.status(primary),
+                            size: 16,
+                            weight: .bold,
+                            color: WidgetStyle.statusColor(primary),
+                            lines: 2,
+                            minimumScale: 0.75
+                        )
                         if let line = streak.text {
                             Text(line).modifier(DetailLine())
                         }
@@ -548,23 +622,25 @@ struct LargeSignalLayout: View {
                     .accessibilityElement(children: .combine)
                     if let secondary {
                         Hairline()
-                            .padding(.vertical, 3)
+                            .padding(.vertical, 4)
                         SecondaryLedgerRow(presentation: secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.top, 12)
             // The outer stack shares its height out among its rows before the
             // spacers claim the rest; without this the column is measured
             // short and its status scales down instead of wrapping.
             .fixedSize(horizontal: false, vertical: true)
 
+            Spacer(minLength: 12)
             Hairline()
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
 
             WeekCrossingStrip(summary: summary, ledger: primary.ledger)
 
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
             Text(footer).modifier(DetailLine(lines: 2))
         }
         .accessibilityElement(children: .contain)
@@ -583,6 +659,7 @@ extension MediumSignalLayout {
             primary: content.primary,
             secondary: content.secondary,
             streak: content.streak,
+            stamp: content.stamp,
             clock: content.clock
         )
     }
