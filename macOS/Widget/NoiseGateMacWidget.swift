@@ -65,7 +65,7 @@ struct MacSnapshotProvider: AppIntentTimelineProvider {
     }
 
     func placeholder(in context: Context) -> MacSnapshotEntry {
-        sampleEntry(focus: .automatic, includeHistory: context.family == .systemLarge)
+        sampleEntry(focus: .automatic, includeHistory: Self.showsHistory(context))
     }
 
     func snapshot(
@@ -75,13 +75,19 @@ struct MacSnapshotProvider: AppIntentTimelineProvider {
         if context.isPreview {
             return sampleEntry(
                 focus: configuration.focus,
-                includeHistory: context.family == .systemLarge
+                includeHistory: Self.showsHistory(context)
             )
         }
         return makeEntry(
             focus: configuration.focus,
-            includeHistory: context.family == .systemLarge
+            includeHistory: Self.showsHistory(context)
         )
+    }
+
+    /// History is one locked JSON read per reload, so only the families that
+    /// draw the streak line or the week strip pay for it.
+    private static func showsHistory(_ context: Context) -> Bool {
+        context.family == .systemMedium || context.family == .systemLarge
     }
 
     func timeline(
@@ -89,7 +95,7 @@ struct MacSnapshotProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> Timeline<MacSnapshotEntry> {
         let now = Date()
-        let includeHistory = context.family == .systemLarge
+        let includeHistory = Self.showsHistory(context)
         let entry = makeEntry(focus: configuration.focus,
                               includeHistory: includeHistory,
                               now: now)
@@ -149,14 +155,16 @@ struct MacSnapshotProvider: AppIntentTimelineProvider {
         )
     }
 
+    /// Six finished days, oldest first, so the gallery shows a streak line
+    /// and one reached day in the strip.
     private static var placeholderHistory: [DayRecord] {
         let calendar = Calendar.current
-        let exampleMinutes = [18, 32, 45, 22, 51, 29]
-        return (1...6).compactMap { daysAgo in
+        let exampleMinutes = [18, 32, 45, 22, 30, 29]
+        return exampleMinutes.enumerated().compactMap { index, minutes in
+            let daysAgo = exampleMinutes.count - index
             guard let date = calendar.date(byAdding: .day, value: -daysAgo, to: .now) else {
                 return nil
             }
-            let minutes = exampleMinutes[daysAgo - 1]
             return DayRecord(
                 dayKey: DayKey.today(date),
                 distractionMinutes: minutes,
@@ -189,42 +197,30 @@ struct MacWidgetView: View {
     @Environment(\.widgetFamily) private var family
     let entry: MacSnapshotEntry
 
-    private var primary: WidgetLedgerPresentation {
-        WidgetLedgerPresentation(
+    /// Exact values, and "this Mac" wherever a family names its device, so
+    /// a number is never mistaken for the iPhone's.
+    private var content: WidgetSystemContent {
+        WidgetSystemContent(
             snapshot: entry.snapshot,
-            ledger: entry.primaryLedger,
-            accuracy: .exact
-        )
-    }
-
-    private var secondary: WidgetLedgerPresentation? {
-        guard let ledger = entry.secondaryLedger else { return nil }
-        return WidgetLedgerPresentation(
-            snapshot: entry.snapshot,
-            ledger: ledger,
-            accuracy: .exact
+            history: entry.history,
+            primaryLedger: entry.primaryLedger,
+            secondaryLedger: entry.secondaryLedger,
+            accuracy: .exact,
+            device: "Mac"
         )
     }
 
     var body: some View {
+        let content = self.content
         switch family {
         case .systemSmall:
-            SmallSignalLayout(primary: primary, secondary: secondary)
+            SmallSignalLayout(content: content)
         case .systemMedium:
-            MediumSignalLayout(primary: primary, secondary: secondary)
+            MediumSignalLayout(content: content)
         case .systemLarge:
-            LargeSignalLayout(
-                primary: primary,
-                secondary: secondary,
-                summary: WidgetWeekSummary(
-                    snapshot: entry.snapshot,
-                    history: entry.history,
-                    ledger: entry.primaryLedger,
-                    accuracy: .exact
-                )
-            )
+            LargeSignalLayout(content: content)
         default:
-            SmallSignalLayout(primary: primary, secondary: secondary)
+            SmallSignalLayout(content: content)
         }
     }
 }

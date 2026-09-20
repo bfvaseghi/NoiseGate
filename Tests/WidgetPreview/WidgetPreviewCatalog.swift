@@ -4,9 +4,14 @@ import WidgetKit
 
 /// What Tests/WidgetPreview renders: the iPhone widget's entry view at every
 /// family it supports, driven by fixed data so two runs of the job produce
-/// the same pixels. Every value is a lower bound, as on a real iPhone, so
-/// the pictures carry the `≥` wording the product ships. The Mac widget
-/// draws the same Shared layouts with exact values and is not rendered here.
+/// the same pixels. Every iPhone value is a lower bound, as on a real iPhone,
+/// so the pictures carry the `≥` wording the product ships. The Mac scenes
+/// draw the same Shared layouts with exact values so the Mac strings can be
+/// reviewed too; Mac has no Lock Screen families, and those frames say so.
+///
+/// The harness renders every scene light and dark, so no scene needs a dark
+/// variant of its own. It cannot render the tinted (`accented`) Home Screen
+/// mode: the rendering mode is set by WidgetKit, not the environment.
 enum WidgetPreviewCatalog {
     static let app = "noisegate"
 
@@ -43,107 +48,221 @@ enum WidgetPreviewCatalog {
     // MARK: - Scenes
 
     static let scenes: [(name: String, view: (WidgetFamily) -> AnyView)] = [
-        // Distractions 30% through, Messages 30% through: an ordinary day.
-        scene("normal-day", Fixture.entry(
-            Fixture.snapshot(distractions: 14, messages: 20)
+        // ≥36m of 45m and ≥20m of 1h: "At least 80% of budget", "3 days
+        // without a crossing" (the 45 four days back stops the walk),
+        // "Updated 1:42 PM", strip "1 confirmed crossing".
+        scene("typical-weekday", Fixture.entry(
+            Fixture.snapshot(distractions: 36, messages: 20)
         )),
-        // 60% and 50%: the watch band, still in the ledger colours.
-        scene("watch", Fixture.entry(
-            Fixture.snapshot(distractions: 27, messages: 33)
+        // Exactly the budget: red ring, "Budget crossed", "Resets at
+        // midnight", flag glyph.
+        scene("budget-crossed", Fixture.entry(
+            Fixture.snapshot(distractions: 45, messages: 20)
         )),
-        // 80% on both: the high band, the widget's own placeholder numbers.
-        scene("high", Fixture.entry(
-            Fixture.snapshot(distractions: 36, messages: 48)
-        )),
-        // Exactly the budget: "Budget crossed", the ring turns to alarm.
-        scene("reached", Fixture.entry(
-            Fixture.snapshot(distractions: 45, messages: 30)
-        )),
-        // Past the budget: "At least 23m over budget".
+        // The 150% threshold: "At least 23m over budget"; small "≥23m over".
         scene("over-budget", Fixture.entry(
-            Fixture.snapshot(distractions: 68, messages: 30)
+            Fixture.snapshot(distractions: 68, messages: 20)
         )),
-        // Fresh install: nothing selected, nothing running, no history.
-        scene("no-data", Fixture.entry(
+        // Selected and running, no Distractions threshold fired yet today:
+        // dashed ring, "—", "No checkpoint yet", clock hidden.
+        scene("no-checkpoint-yet", Fixture.entry(
+            Fixture.snapshot(distractions: 0, messages: 20, updatedAt: Fixture.startOfToday)
+        )),
+        // Fresh install: nothing selected, nothing running, no history;
+        // "—", "Choose distracting apps" / "Choose apps".
+        scene("no-apps-selected", Fixture.entry(
             Fixture.snapshot(distractions: nil, messages: nil, active: false),
             history: []
         )),
-        // Selected and running, but no threshold has fired yet today.
-        scene("no-checkpoint", Fixture.entry(
-            Fixture.snapshot(distractions: 0, messages: 0)
-        )),
-        // Stale: the monitor is not running, so the floors stop moving.
-        scene("paused", Fixture.entry(
+        // The monitor is stopped: ring still amber (the floor is still true),
+        // "Tracking paused", pause glyph, "Updated 1:42 PM".
+        scene("tracking-paused", Fixture.entry(
             Fixture.snapshot(distractions: 36, messages: 20, active: false)
         )),
-        // Only Distractions selected; the Messages column asks for apps.
-        scene("distractions-only", Fixture.entry(
-            Fixture.snapshot(distractions: 27, messages: nil)
-        )),
-        // The Messages focus: a single ledger, teal, no secondary row.
+        // The Messages focus: teal ring, "MESSAGES", Distractions as the
+        // secondary row.
         scene("messages-focus", Fixture.entry(
-            Fixture.snapshot(distractions: 14, messages: 48),
+            Fixture.snapshot(distractions: 36, messages: 20),
             focus: .messages
         )),
-        // Wide values ("≥7h 45m" of "8h") to exercise every scale guard.
+        // The widest strings: "≥7h 45m" of "8h 00m", Messages over at
+        // "≥1h 05m / 1h 00m". Numerals scale but stay above 13.3 pt;
+        // "OF 8h 00m" fits at 11 pt; nothing clips.
         scene("long-values", Fixture.entry(
             Fixture.snapshot(
                 distractions: 465,
-                messages: 125,
+                messages: 65,
                 distractionBudget: 480,
-                messagesBudget: 120
+                messagesBudget: 60
             )
-        ))
+        )),
+        // Yesterday reached its budget: "Crossed yesterday".
+        scene("crossed-yesterday", Fixture.entry(
+            Fixture.snapshot(distractions: 10, messages: 20),
+            history: Fixture.history([18, 32, 20, 22, 30, 51])
+        )),
+        // Records for −6…−3 only: the streak line is omitted and the strip
+        // shows two dashed outlines before today.
+        scene("gap-in-history", Fixture.entry(
+            Fixture.snapshot(distractions: 10, messages: 20),
+            history: Fixture.history([18, 32, 45, 22], endingDaysAgo: 3)
+        )),
+        // After midnight, before the first monitor callback: zero minutes
+        // with yesterday's write time. "—", "No checkpoint yet", no clock,
+        // masthead right hidden.
+        scene("after-midnight", Fixture.entry(
+            Fixture.snapshot(distractions: 0, messages: 0, updatedAt: Fixture.lateYesterday)
+        )),
+        // A Saturday with the weekend target: "OF 1h 15m".
+        scene("weekend-budget", Fixture.entry(
+            Fixture.snapshot(distractions: 40, messages: 20, distractionBudget: 75, now: Fixture.saturday),
+            history: Fixture.history(now: Fixture.saturday)
+        ), now: Fixture.saturday),
+        // The ember accent beside the alarm red: distinguishable by glyph
+        // and words, never by hue alone.
+        scene("ember-accent-typical", Fixture.entry(
+            Fixture.snapshot(distractions: 36, messages: 20)
+        ), accent: .ember),
+        scene("ember-accent-crossed", Fixture.entry(
+            Fixture.snapshot(distractions: 45, messages: 20)
+        ), accent: .ember),
+        // The same layout on an iPad: the footer names the device.
+        scene("ipad-typical", Fixture.entry(
+            Fixture.snapshot(distractions: 36, messages: 20)
+        ), device: "iPad"),
+        // The Mac widget's families with exact values: "80% of budget",
+        // "3 days under budget", "Tracking on this Mac", "THIS MAC · LIVE".
+        macScene("mac-live", Fixture.macSnapshot(distractions: 36, messages: 20, active: true)),
+        // The tracker stopped heartbeating at 1:42 PM: "Paused on this Mac ·
+        // 1:42 PM", "THIS MAC · PAUSED 1:42 PM".
+        macScene("mac-paused", Fixture.macSnapshot(distractions: 36, messages: 20, active: false)),
+        // An exact zero is honest on the Mac: "0m", "0% of budget".
+        macScene("mac-midnight-zero", Fixture.macSnapshot(distractions: 0, messages: 0, active: true))
     ]
 
     private static func scene(
         _ name: String,
-        _ entry: SnapshotEntry
+        _ entry: SnapshotEntry,
+        now: Date = Fixture.now,
+        device: String = "iPhone",
+        accent: AccentTheme = .amber
     ) -> (name: String, view: (WidgetFamily) -> AnyView) {
         (name, { family in
-            AnyView(NoiseGateWidgetView(entry: entry, family: family, now: Fixture.now))
+            // The Distractions accent is read from the app-group defaults
+            // while rendering, so every scene selects its own: the order
+            // scenes render in must not leak one scene's accent into the next.
+            AccentTheme.select(accent)
+            return AnyView(NoiseGateWidgetView(
+                entry: entry,
+                family: family,
+                now: now,
+                device: device
+            ))
         })
+    }
+
+    private static func macScene(
+        _ name: String,
+        _ snapshot: UsageSnapshot,
+        history: [DayRecord] = Fixture.history(isFloor: false)
+    ) -> (name: String, view: (WidgetFamily) -> AnyView) {
+        (name, { family in
+            AccentTheme.select(.amber)
+            let content = WidgetSystemContent(
+                snapshot: snapshot,
+                history: history,
+                primaryLedger: .distractions,
+                secondaryLedger: .messages,
+                accuracy: .exact,
+                device: "Mac",
+                now: Fixture.now,
+                calendar: Fixture.calendar
+            )
+            return AnyView(MacFamilyPreview(family: family, content: content))
+        })
+    }
+}
+
+/// The Mac widget's three families through the Shared layouts, as
+/// `MacWidgetView` draws them. The renderer asks for every family in the
+/// catalog, and the Mac has no Lock Screen; those frames carry a note rather
+/// than an empty plate that could pass for a failed render.
+private struct MacFamilyPreview: View {
+    let family: WidgetFamily
+    let content: WidgetSystemContent
+
+    var body: some View {
+        switch family {
+        case .systemSmall:
+            SmallSignalLayout(content: content)
+        case .systemMedium:
+            MediumSignalLayout(content: content)
+        case .systemLarge:
+            LargeSignalLayout(content: content)
+        default:
+            Text("Not a Mac family")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(NG.inkSoft)
+        }
     }
 }
 
 // MARK: - Fixed data
 
 private enum Fixture {
-    /// Wednesday 11 March 2026 at midday, local time. Local rather than UTC
-    /// because the widget keys its days by the device calendar, and midday
-    /// keeps every derived day clear of a boundary.
-    static let now: Date = calendar.date(
-        from: DateComponents(year: 2026, month: 3, day: 11, hour: 12)
-    ) ?? Date(timeIntervalSince1970: 1_773_230_400)
-
     static let calendar: Calendar = {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = .autoupdatingCurrent
         return value
     }()
 
-    /// One of each day state the strip can draw, oldest first: a confirmed
-    /// crossing, a checkpoint, a day with no record at all (the 8th is
-    /// skipped), a day with no checkpoint, another checkpoint, and an
-    /// overage. Today comes from the snapshot.
-    static let history: [DayRecord] = [
-        (offset: -6, distractions: 45, messages: 30),
-        (offset: -5, distractions: 27, messages: 12),
-        (offset: -3, distractions: 0, messages: 0),
-        (offset: -2, distractions: 36, messages: 18),
-        (offset: -1, distractions: 68, messages: 24)
-    ].compactMap { day in
-        guard let date = calendar.date(byAdding: .day, value: day.offset, to: now) else {
-            return nil
+    /// Wednesday 11 March 2026 at 14:00, local time. Local rather than UTC
+    /// because the widget keys its days by the device calendar, and
+    /// mid-afternoon keeps every derived day clear of a boundary.
+    static let now: Date = calendar.date(
+        from: DateComponents(year: 2026, month: 3, day: 11, hour: 14)
+    ) ?? Date(timeIntervalSince1970: 1_773_237_600)
+
+    /// Saturday 14 March 2026 at 14:00, for the weekend budget.
+    static let saturday: Date = calendar.date(
+        from: DateComponents(year: 2026, month: 3, day: 14, hour: 14)
+    ) ?? now
+
+    static let startOfToday: Date = calendar.startOfDay(for: now)
+
+    static let lateYesterday: Date = calendar.date(
+        from: DateComponents(year: 2026, month: 3, day: 10, hour: 23, minute: 10)
+    ) ?? now
+
+    /// Every snapshot was written at 13:42 on its own day unless a scene
+    /// says otherwise.
+    static func writeTime(on day: Date) -> Date {
+        calendar.date(bySettingHour: 13, minute: 42, second: 0, of: day) ?? day
+    }
+
+    /// Finished days, listed oldest first, the last one `endingDaysAgo`
+    /// days before `now`. The default is the brief's typical week: a
+    /// confirmed crossing four days back, then three clear days.
+    static func history(
+        _ distractions: [Int] = [18, 32, 45, 22, 30, 29],
+        endingDaysAgo: Int = 1,
+        now: Date = now,
+        isFloor: Bool = true
+    ) -> [DayRecord] {
+        distractions.enumerated().compactMap { index, minutes in
+            let daysAgo = endingDaysAgo + distractions.count - 1 - index
+            guard let date = calendar.date(byAdding: .day, value: -daysAgo, to: now) else {
+                return nil
+            }
+            return DayRecord(
+                dayKey: DayKey.today(date),
+                distractionMinutes: minutes,
+                messagesMinutes: max(8, minutes / 2),
+                distractionBudgetMinutes: 45,
+                messagesBudgetMinutes: 60,
+                isFloor: isFloor
+            )
         }
-        return DayRecord(
-            dayKey: DayKey.today(date),
-            distractionMinutes: day.distractions,
-            messagesMinutes: day.messages,
-            distractionBudgetMinutes: 45,
-            messagesBudgetMinutes: 60,
-            isFloor: true
-        )
     }
 
     /// `nil` minutes means the ledger has no selection.
@@ -152,7 +271,10 @@ private enum Fixture {
         messages: Int?,
         distractionBudget: Int = 45,
         messagesBudget: Int = 60,
-        active: Bool = true
+        active: Bool = true,
+        now: Date = now,
+        updatedAt: Date? = nil,
+        isFloor: Bool = true
     ) -> UsageSnapshot {
         UsageSnapshot(
             dayKey: DayKey.today(now),
@@ -162,15 +284,29 @@ private enum Fixture {
             messagesBudgetMinutes: messagesBudget,
             distractionsConfigured: distractions != nil,
             messagesConfigured: messages != nil,
-            isFloor: true,
+            isFloor: isFloor,
             monitoringIsActive: active,
-            updatedAt: now
+            updatedAt: updatedAt ?? writeTime(on: now)
+        )
+    }
+
+    /// The Mac tracker's snapshot: exact minutes, heartbeat at 13:42.
+    static func macSnapshot(
+        distractions: Int,
+        messages: Int,
+        active: Bool
+    ) -> UsageSnapshot {
+        snapshot(
+            distractions: distractions,
+            messages: messages,
+            active: active,
+            isFloor: false
         )
     }
 
     static func entry(
         _ snapshot: UsageSnapshot,
-        history: [DayRecord] = history,
+        history: [DayRecord] = history(),
         focus: NoiseGateWidgetFocus = .automatic
     ) -> SnapshotEntry {
         SnapshotEntry(date: now, snapshot: snapshot, history: history, focus: focus)

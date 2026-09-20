@@ -672,6 +672,320 @@ final class SharedModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Widget compact strings
+
+    private func presentation(
+        _ ledger: WidgetLedger = .distractions,
+        minutes: Int,
+        budget: Int = 45,
+        configured: Bool = true,
+        active: Bool = true,
+        accuracy: WidgetAccuracy = .lowerBound
+    ) -> WidgetLedgerPresentation {
+        let snapshot = UsageSnapshot(
+            distractionMinutes: ledger == .distractions ? minutes : 0,
+            messagesMinutes: ledger == .messages ? minutes : 0,
+            distractionBudgetMinutes: ledger == .distractions ? budget : 45,
+            messagesBudgetMinutes: ledger == .messages ? budget : 60,
+            distractionsConfigured: ledger == .distractions && configured,
+            messagesConfigured: ledger == .messages && configured,
+            isFloor: true,
+            monitoringIsActive: active
+        )
+        return WidgetLedgerPresentation(snapshot: snapshot, ledger: ledger, accuracy: accuracy)
+    }
+
+    func testCompactSignalTextCoversEveryStateOnBothPlatforms() {
+        XCTAssertEqual(presentation(minutes: 0, configured: false).compactSignalText, "Choose apps")
+        XCTAssertEqual(presentation(.messages, minutes: 0, configured: false).compactSignalText, "Choose apps")
+        XCTAssertEqual(presentation(minutes: 0).compactSignalText, "No checkpoint yet")
+        XCTAssertEqual(presentation(minutes: 36).compactSignalText, "≥80% of 45m")
+        XCTAssertEqual(presentation(minutes: 45).compactSignalText, "Budget crossed")
+        XCTAssertEqual(presentation(minutes: 68).compactSignalText, "≥23m over")
+        XCTAssertEqual(presentation(minutes: 36, active: false).compactSignalText, "Tracking paused")
+        XCTAssertEqual(presentation(minutes: 68, active: false).compactSignalText, "Tracking paused")
+        XCTAssertEqual(presentation(minutes: 0, configured: false, active: false).compactSignalText, "Choose apps")
+
+        XCTAssertEqual(presentation(minutes: 0, accuracy: .exact).compactSignalText, "0% of 45m")
+        XCTAssertEqual(presentation(minutes: 36, accuracy: .exact).compactSignalText, "80% of 45m")
+        XCTAssertEqual(presentation(minutes: 45, accuracy: .exact).compactSignalText, "Budget reached")
+        XCTAssertEqual(presentation(minutes: 68, accuracy: .exact).compactSignalText, "23m over")
+        XCTAssertEqual(presentation(minutes: 40, budget: 75, accuracy: .exact).compactSignalText, "53% of 1h 15m")
+    }
+
+    func testCompactValueTextShortensOnlyFloorsPastAnHour() {
+        XCTAssertEqual(presentation(minutes: 36).compactValueText, "≥36m")
+        XCTAssertEqual(presentation(minutes: 65, budget: 60).compactValueText, "≥1h")
+        XCTAssertEqual(presentation(minutes: 125, budget: 60).compactValueText, "≥2h")
+        XCTAssertEqual(presentation(minutes: 0).compactValueText, "—")
+        XCTAssertEqual(presentation(minutes: 65, configured: false).compactValueText, "—")
+        // An exact value is never rounded down: "1h" would misstate 65 minutes.
+        XCTAssertEqual(presentation(minutes: 65, budget: 60, accuracy: .exact).compactValueText, "1h 05m")
+    }
+
+    func testInlineTextNamesLedgerStateAndValue() {
+        XCTAssertEqual(presentation(minutes: 36).inlineText, "Distractions ≥36m / 45m")
+        XCTAssertEqual(presentation(.messages, minutes: 20, budget: 60).inlineText, "Messages ≥20m / 1h 00m")
+        XCTAssertEqual(presentation(minutes: 0, configured: false).inlineText, "Distractions not set")
+        XCTAssertEqual(presentation(minutes: 0).inlineText, "Distractions · no checkpoint")
+        XCTAssertEqual(presentation(minutes: 0, active: false).inlineText, "Distractions · no checkpoint")
+        XCTAssertEqual(presentation(minutes: 36, active: false).inlineText, "Distractions paused · ≥36m")
+        XCTAssertEqual(presentation(minutes: 36, accuracy: .exact).inlineText, "Distractions 36m / 45m")
+    }
+
+    func testWidgetSymbolShowsPauseAheadOfTheLevel() {
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 36, active: false)), "pause.circle")
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 68, active: false)), "pause.circle")
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 0, configured: false, active: false)), "circle.dotted")
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 36)), "circle.fill")
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 45)), "flag.fill")
+        XCTAssertEqual(WidgetStyle.symbol(presentation(minutes: 68)), "exclamationmark.circle.fill")
+    }
+
+    // MARK: - Widget streak and clock lines
+
+    private func newYork() throws -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        return calendar
+    }
+
+    /// Monday 24 August 2026 at noon in New York, so 2026-08-23 is yesterday.
+    private func mondayNoon(_ calendar: Calendar) throws -> Date {
+        try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 24,
+            hour: 12
+        )))
+    }
+
+    private func streakRecord(
+        _ day: String,
+        distraction: Int,
+        distractionBudget: Int = 45,
+        messages: Int = 0
+    ) -> DayRecord {
+        DayRecord(
+            dayKey: day,
+            distractionMinutes: distraction,
+            messagesMinutes: messages,
+            distractionBudgetMinutes: distractionBudget,
+            messagesBudgetMinutes: 60,
+            isFloor: true
+        )
+    }
+
+    private func todaySnapshot(
+        distractions: Int,
+        dayKey: String = "2026-08-24",
+        configured: Bool = true,
+        active: Bool = true,
+        updatedAt: Date = Date()
+    ) -> UsageSnapshot {
+        UsageSnapshot(
+            dayKey: dayKey,
+            distractionMinutes: distractions,
+            messagesMinutes: 10,
+            distractionBudgetMinutes: 45,
+            messagesBudgetMinutes: 60,
+            distractionsConfigured: configured,
+            messagesConfigured: true,
+            isFloor: true,
+            monitoringIsActive: active,
+            updatedAt: updatedAt
+        )
+    }
+
+    private func streak(
+        _ history: [DayRecord],
+        snapshot: UsageSnapshot? = nil,
+        ledger: WidgetLedger = .distractions,
+        accuracy: WidgetAccuracy = .lowerBound
+    ) throws -> String? {
+        let calendar = try newYork()
+        return WidgetStreakLine(
+            snapshot: snapshot ?? todaySnapshot(distractions: 10),
+            history: history,
+            ledger: ledger,
+            accuracy: accuracy,
+            now: try mondayNoon(calendar),
+            calendar: calendar
+        ).text
+    }
+
+    func testWidgetStreakCountsCalendarDaysAndStopsAtAGap() throws {
+        // 08-21 has no record, so 08-20 must not be bridged into the count.
+        let history = [
+            streakRecord("2026-08-23", distraction: 30),
+            streakRecord("2026-08-22", distraction: 0),
+            streakRecord("2026-08-20", distraction: 30)
+        ]
+        XCTAssertEqual(try streak(history), "2 days without a crossing")
+        XCTAssertEqual(try streak(history, accuracy: .exact), "2 days under budget")
+        XCTAssertEqual(try streak(history.shuffled()), "2 days without a crossing")
+    }
+
+    func testWidgetStreakStopsAtADayThatReachedItsOwnBudget() throws {
+        // 30 minutes reached the 20-minute target that applied on 08-22,
+        // even though today's target is 45.
+        let history = [
+            streakRecord("2026-08-23", distraction: 30),
+            streakRecord("2026-08-22", distraction: 30, distractionBudget: 20),
+            streakRecord("2026-08-21", distraction: 5)
+        ]
+        XCTAssertEqual(try streak(history), "1 day without a crossing")
+        XCTAssertEqual(try streak(history, accuracy: .exact), "1 day under budget")
+    }
+
+    func testWidgetStreakWordsYesterdaysCrossingPerPlatformAndLedger() throws {
+        let history = [
+            streakRecord("2026-08-23", distraction: 45, messages: 10),
+            streakRecord("2026-08-22", distraction: 10, messages: 10)
+        ]
+        XCTAssertEqual(try streak(history), "Crossed yesterday")
+        XCTAssertEqual(try streak(history, accuracy: .exact), "Budget reached yesterday")
+        // Messages is judged by its own column of the same records.
+        XCTAssertEqual(try streak(history, ledger: .messages), "2 days without a crossing")
+        XCTAssertFalse(try XCTUnwrap(try streak(history)).localizedCaseInsensitiveContains("under"))
+    }
+
+    func testWidgetStreakSaysResetsAtMidnightOnlyForTodaysReachedSnapshot() throws {
+        let history = [streakRecord("2026-08-23", distraction: 30)]
+        XCTAssertEqual(
+            try streak(history, snapshot: todaySnapshot(distractions: 45)),
+            "Resets at midnight"
+        )
+        XCTAssertEqual(
+            try streak(history, snapshot: todaySnapshot(distractions: 45), accuracy: .exact),
+            "Resets at midnight"
+        )
+        // A snapshot from another day says nothing about today.
+        XCTAssertEqual(
+            try streak(history, snapshot: todaySnapshot(distractions: 45, dayKey: "2026-08-23")),
+            "1 day without a crossing"
+        )
+    }
+
+    func testWidgetStreakIsOmittedWithoutYesterdayOrASelection() throws {
+        XCTAssertNil(try streak([]))
+        XCTAssertNil(try streak([streakRecord("2026-08-22", distraction: 10)]))
+        XCTAssertNil(try streak(
+            [streakRecord("2026-08-23", distraction: 10)],
+            snapshot: todaySnapshot(distractions: 0, configured: false)
+        ))
+    }
+
+    func testWidgetStreakNeverExceedsTheHistoryTheAppKeeps() throws {
+        let calendar = try newYork()
+        let now = try mondayNoon(calendar)
+        let history = try (1...35).map { daysAgo -> DayRecord in
+            let date = try XCTUnwrap(calendar.date(byAdding: .day, value: -daysAgo, to: now))
+            let parts = calendar.dateComponents([.year, .month, .day], from: date)
+            let key = String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
+            return streakRecord(key, distraction: 5)
+        }
+        XCTAssertEqual(try streak(history), "\(HistoryStore.maxDays) days without a crossing")
+    }
+
+    func testWidgetClockLineHidesStaleAndCheckpointlessSnapshots() throws {
+        let calendar = try newYork()
+        let now = try mondayNoon(calendar)
+        let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: now))
+        func clock(_ snapshot: UsageSnapshot) -> String? {
+            WidgetClockLine.text(
+                snapshot: snapshot,
+                ledger: .distractions,
+                accuracy: .lowerBound,
+                now: now,
+                calendar: calendar
+            )
+        }
+
+        XCTAssertNil(clock(todaySnapshot(distractions: 36, updatedAt: yesterday)))
+        XCTAssertNil(clock(todaySnapshot(distractions: 0, updatedAt: now)))
+        XCTAssertNil(clock(todaySnapshot(distractions: 36, configured: false, updatedAt: now)))
+        XCTAssertNil(clock(todaySnapshot(distractions: 36, dayKey: "2026-08-23", updatedAt: now)))
+        XCTAssertNil(WidgetClockLine.masthead(
+            snapshot: todaySnapshot(distractions: 36, updatedAt: yesterday),
+            ledger: .distractions,
+            accuracy: .lowerBound,
+            now: now,
+            calendar: calendar
+        ))
+    }
+
+    func testWidgetClockLineShowsTodaysWriteTimeOnIPhone() throws {
+        let calendar = try newYork()
+        let now = try mondayNoon(calendar)
+        let writtenAt = now.addingTimeInterval(-3600)
+        let time = writtenAt.formatted(date: .omitted, time: .shortened)
+        let snapshot = todaySnapshot(distractions: 36, updatedAt: writtenAt)
+
+        XCTAssertEqual(
+            WidgetClockLine.time(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar),
+            time
+        )
+        XCTAssertEqual(
+            WidgetClockLine.text(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar),
+            "Updated \(time)"
+        )
+        XCTAssertEqual(
+            WidgetClockLine.masthead(snapshot: snapshot, ledger: .distractions, accuracy: .lowerBound, now: now, calendar: calendar),
+            "UPDATED \(time)"
+        )
+        // A stopped monitor keeps its last write time: the floor is still true.
+        XCTAssertEqual(
+            WidgetClockLine.text(
+                snapshot: todaySnapshot(distractions: 36, active: false, updatedAt: writtenAt),
+                ledger: .distractions,
+                accuracy: .lowerBound,
+                now: now,
+                calendar: calendar
+            ),
+            "Updated \(time)"
+        )
+    }
+
+    func testWidgetClockLineDescribesTheMacTracker() throws {
+        let calendar = try newYork()
+        let now = try mondayNoon(calendar)
+        let heartbeat = now.addingTimeInterval(-50)
+        let time = heartbeat.formatted(date: .omitted, time: .shortened)
+        let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: now))
+        func line(active: Bool, updatedAt: Date) -> (text: String?, masthead: String?, time: String?) {
+            let snapshot = UsageSnapshot(
+                dayKey: "2026-08-24",
+                distractionMinutes: 36,
+                distractionBudgetMinutes: 45,
+                distractionsConfigured: true,
+                isFloor: false,
+                monitoringIsActive: active,
+                updatedAt: updatedAt
+            )
+            return (
+                WidgetClockLine.text(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar),
+                WidgetClockLine.masthead(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar),
+                WidgetClockLine.time(snapshot: snapshot, ledger: .distractions, accuracy: .exact, now: now, calendar: calendar)
+            )
+        }
+
+        let live = line(active: true, updatedAt: heartbeat)
+        XCTAssertEqual(live.text, "Tracking on this Mac")
+        XCTAssertEqual(live.masthead, "THIS MAC · LIVE")
+        XCTAssertNil(live.time)
+
+        let paused = line(active: false, updatedAt: heartbeat)
+        XCTAssertEqual(paused.text, "Paused on this Mac · \(time)")
+        XCTAssertEqual(paused.masthead, "THIS MAC · PAUSED \(time)")
+        XCTAssertEqual(paused.time, time)
+
+        let stale = line(active: false, updatedAt: yesterday)
+        XCTAssertEqual(stale.text, "Paused on this Mac")
+        XCTAssertEqual(stale.masthead, "THIS MAC · PAUSED")
+        XCTAssertNil(stale.time)
+    }
+
     // MARK: - Weekend budgets
 
     /// A config written before weekend budgets existed must keep its numbers

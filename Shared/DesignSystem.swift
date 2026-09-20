@@ -40,18 +40,42 @@ enum NG {
     }
 }
 
-/// The signature progress arc: a thick track, an angular-gradient sweep, and
-/// an endpoint dot so it reads as a needle rather than a donut. Defined once
-/// here because both the in-app gauge and the widgets draw it.
+/// The signature progress arc: a thick track, a sweep, and an endpoint dot so
+/// it reads as a needle rather than a donut. Defined once here because both
+/// the in-app gauge and the widgets draw it.
 struct RingArc: View {
+    /// How the sweep is painted. The app keeps the angular gradient; the
+    /// widgets stroke the plain colour, because at widget sizes the 55 %
+    /// start reads as a fade and the tinted Home Screen rendering mode
+    /// desaturates a gradient into two tones.
+    enum Sweep {
+        case gradient
+        case solid
+    }
+
     let fraction: Double
     let color: Color
     let size: CGFloat
     /// Drawn hollow when there is nothing to report yet, so an empty ring is
     /// never mistaken for a zero measurement.
     var isIndeterminate: Bool = false
+    var sweep: Sweep = .gradient
 
     private var stroke: CGFloat { max(6, size * 0.105) }
+
+    private var sweepStyle: AnyShapeStyle {
+        switch sweep {
+        case .gradient:
+            return AnyShapeStyle(AngularGradient(
+                colors: [color.opacity(0.55), color],
+                center: .center,
+                startAngle: .degrees(0),
+                endAngle: .degrees(360)
+            ))
+        case .solid:
+            return AnyShapeStyle(color)
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -72,12 +96,7 @@ struct RingArc: View {
                 Circle()
                     .trim(from: 0, to: max(0, min(1, fraction)))
                     .stroke(
-                        AngularGradient(
-                            colors: [color.opacity(0.55), color],
-                            center: .center,
-                            startAngle: .degrees(0),
-                            endAngle: .degrees(360)
-                        ),
+                        sweepStyle,
                         style: StrokeStyle(lineWidth: stroke, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))

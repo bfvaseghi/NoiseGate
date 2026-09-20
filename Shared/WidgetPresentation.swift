@@ -115,6 +115,49 @@ struct WidgetLedgerPresentation: Equatable {
         }
     }
 
+    /// Hours-only reading for the Lock Screen circle, where "≥1h 05m" does
+    /// not fit at a legible size. Dropping the minutes keeps a floor true,
+    /// so only floors are shortened; an exact value is never rounded down.
+    var compactValueText: String {
+        guard isConfigured, isFloor, minutes >= 60 else { return valueText }
+        return "≥\(minutes / 60)h"
+    }
+
+    /// The small family's status line: the facts of `signalText` in the
+    /// width of a 126 pt canvas at 12 pt, with the budget named because the
+    /// small ring has no room for it.
+    var compactSignalText: String {
+        guard isConfigured else { return "Choose apps" }
+        guard monitoringIsActive else { return "Tracking paused" }
+        switch level {
+        case .notConfigured:
+            return "Choose apps"
+        case .waitingForCheckpoint:
+            return "No checkpoint yet"
+        case .clear, .watch, .high:
+            return "\(isFloor ? "≥" : "")\(progressPercent)% of \(budgetMinutes.asHoursMinutes)"
+        case .reached:
+            return isFloor ? "Budget crossed" : "Budget reached"
+        case .over:
+            return "\(isFloor ? "≥" : "")\((minutes - budgetMinutes).asHoursMinutes) over"
+        }
+    }
+
+    /// The inline Lock Screen line: ledger, state and value, never more than
+    /// 27 characters.
+    var inlineText: String {
+        let name = ledger.title
+        switch level {
+        case .notConfigured:
+            return "\(name) not set"
+        case .waitingForCheckpoint:
+            return "\(name) · no checkpoint"
+        default:
+            guard monitoringIsActive else { return "\(name) paused · \(valueText)" }
+            return "\(name) \(valueText) / \(budgetMinutes.asHoursMinutes)"
+        }
+    }
+
     /// A full sentence for Siri and Shortcuts. It reads `isFloor` from the
     /// same place the widget does, so a spoken answer can never claim more
     /// precision than the screen shows.
@@ -229,7 +272,7 @@ struct WidgetWeekSummary: Equatable {
                 ($0.dayKey, $0)
             }
         )
-        let todayKey = Self.dayKey(for: now, calendar: calendar)
+        let todayKey = widgetDayKey(for: now, calendar: calendar)
         byDay.removeValue(forKey: todayKey)
         if snapshot.dayKey == todayKey {
             let configured = ledger == .distractions
@@ -245,7 +288,7 @@ struct WidgetWeekSummary: Equatable {
             guard let date = calendar.date(byAdding: .day, value: offset, to: now) else {
                 return nil
             }
-            let key = Self.dayKey(for: date, calendar: calendar)
+            let key = widgetDayKey(for: date, calendar: calendar)
             let record = byDay[key]
             let minutes: Int
             let budget: Int
@@ -297,12 +340,175 @@ struct WidgetWeekSummary: Equatable {
         default: return "Budget reached on \(reachedDayCount) days"
         }
     }
+}
 
-    private static func dayKey(for date: Date, calendar: Calendar) -> String {
-        let parts = calendar.dateComponents([.year, .month, .day], from: date)
-        guard let year = parts.year, let month = parts.month, let day = parts.day else {
-            return "1970-01-01"
+/// The medium and large families' streak line: finished calendar days,
+/// counted back from yesterday until a day is missing or reached its own
+/// stored budget. A missing day ends the count instead of being bridged —
+/// a day the monitor never filed is not a day without a crossing — which is
+/// why this does not reuse `StreakStats`, whose run walks records.
+struct WidgetStreakLine: Equatable {
+    let text: String?
+
+    init(
+        snapshot: UsageSnapshot,
+        history: [DayRecord],
+        ledger: WidgetLedger,
+        accuracy: WidgetAccuracy,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
+        let configured: Bool
+        let todayReached: Bool
+        switch ledger {
+        case .distractions:
+            configured = snapshot.distractionsConfigured
+            todayReached = snapshot.distractionMinutes >= snapshot.distractionBudgetMinutes
+        case .messages:
+            configured = snapshot.messagesConfigured
+            todayReached = snapshot.messagesMinutes >= snapshot.messagesBudgetMinutes
         }
-        return String(format: "%04d-%02d-%02d", year, month, day)
+        guard configured else {
+            text = nil
+            return
+        }
+        if snapshot.dayKey == widgetDayKey(for: now, calendar: calendar), todayReached {
+            text = "Resets at midnight"
+            return
+        }
+
+        let byDay = Dictionary(
+            uniqueKeysWithValues: HistoryStore.canonicalized(history).map {
+                ($0.dayKey, $0)
+            }
+        )
+        var run = 0
+        var stoppedAtReachedDay = false
+        for offset in 1...HistoryStore.maxDays {
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: now),
+                  let record = byDay[widgetDayKey(for: date, calendar: calendar)] else {
+                break
+            }
+            let reached = ledger == .distractions
+                ? record.distractionReachedBudget : record.messagesReachedBudget
+            if reached {
+                stoppedAtReachedDay = true
+                break
+            }
+            run += 1
+        }
+
+        let isFloor = accuracy == .lowerBound
+        switch run {
+        case 0:
+            guard stoppedAtReachedDay else {
+                text = nil
+                return
+            }
+            text = isFloor ? "Crossed yesterday" : "Budget reached yesterday"
+        case 1:
+            text = isFloor ? "1 day without a crossing" : "1 day under budget"
+        default:
+            text = isFloor ? "\(run) days without a crossing" : "\(run) days under budget"
+        }
     }
+}
+
+/// The "when" beside the number. On iPhone it is the snapshot's own write
+/// time — "Updated", not "Checkpoint", because a budget or selection save
+/// bumps `updatedAt` too — shown only while the snapshot is today's and holds
+/// a checkpoint. On the Mac the tracker heartbeats every 30 s, so a write
+/// time says nothing; the line says whether the tracker is live and, when it
+/// is not, when it last was.
+enum WidgetClockLine {
+    /// The shortened local time of the last write, or nil when no time may
+    /// be shown for this platform and state.
+    static func time(
+        snapshot: UsageSnapshot,
+        ledger: WidgetLedger,
+        accuracy: WidgetAccuracy,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> String? {
+        let today = widgetDayKey(for: now, calendar: calendar)
+        let writtenToday = widgetDayKey(for: snapshot.updatedAt, calendar: calendar) == today
+        switch accuracy {
+        case .lowerBound:
+            let level = WidgetLedgerPresentation(
+                snapshot: snapshot,
+                ledger: ledger,
+                accuracy: accuracy
+            ).level
+            guard snapshot.dayKey == today,
+                  writtenToday,
+                  level != .notConfigured,
+                  level != .waitingForCheckpoint else { return nil }
+            return formatted(snapshot.updatedAt)
+        case .exact:
+            guard !snapshot.monitoringIsActive, writtenToday else { return nil }
+            return formatted(snapshot.updatedAt)
+        }
+    }
+
+    /// The running-text line for the medium column.
+    static func text(
+        snapshot: UsageSnapshot,
+        ledger: WidgetLedger,
+        accuracy: WidgetAccuracy,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> String? {
+        let time = time(
+            snapshot: snapshot,
+            ledger: ledger,
+            accuracy: accuracy,
+            now: now,
+            calendar: calendar
+        )
+        switch accuracy {
+        case .lowerBound:
+            return time.map { "Updated \($0)" }
+        case .exact:
+            guard !snapshot.monitoringIsActive else { return "Tracking on this Mac" }
+            return time.map { "Paused on this Mac · \($0)" } ?? "Paused on this Mac"
+        }
+    }
+
+    /// The small-caps line at the top right of the large family.
+    static func masthead(
+        snapshot: UsageSnapshot,
+        ledger: WidgetLedger,
+        accuracy: WidgetAccuracy,
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> String? {
+        let time = time(
+            snapshot: snapshot,
+            ledger: ledger,
+            accuracy: accuracy,
+            now: now,
+            calendar: calendar
+        )
+        switch accuracy {
+        case .lowerBound:
+            return time.map { "UPDATED \($0)" }
+        case .exact:
+            guard !snapshot.monitoringIsActive else { return "THIS MAC · LIVE" }
+            return time.map { "THIS MAC · PAUSED \($0)" } ?? "THIS MAC · PAUSED"
+        }
+    }
+
+    private static func formatted(_ date: Date) -> String {
+        date.formatted(date: .omitted, time: .shortened)
+    }
+}
+
+/// `DayKey.today` for an injected calendar, so the week, streak and clock
+/// stay deterministic in tests and previews.
+private func widgetDayKey(for date: Date, calendar: Calendar) -> String {
+    let parts = calendar.dateComponents([.year, .month, .day], from: date)
+    guard let year = parts.year, let month = parts.month, let day = parts.day else {
+        return "1970-01-01"
+    }
+    return String(format: "%04d-%02d-%02d", year, month, day)
 }

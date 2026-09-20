@@ -1,5 +1,6 @@
 import AppIntents
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // Tests/WidgetPreview compiles this file into a test bundle with
@@ -69,7 +70,7 @@ struct SnapshotEntry: TimelineEntry {
 
 struct SnapshotProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> SnapshotEntry {
-        sampleEntry(focus: .automatic, includeHistory: context.family == .systemLarge)
+        sampleEntry(focus: .automatic, includeHistory: Self.showsHistory(context))
     }
 
     func snapshot(
@@ -79,12 +80,12 @@ struct SnapshotProvider: AppIntentTimelineProvider {
         if context.isPreview {
             return sampleEntry(
                 focus: configuration.focus,
-                includeHistory: context.family == .systemLarge
+                includeHistory: Self.showsHistory(context)
             )
         }
         return makeEntry(
             focus: configuration.focus,
-            includeHistory: context.family == .systemLarge
+            includeHistory: Self.showsHistory(context)
         )
     }
 
@@ -94,10 +95,16 @@ struct SnapshotProvider: AppIntentTimelineProvider {
     ) async -> Timeline<SnapshotEntry> {
         let entry = makeEntry(
             focus: configuration.focus,
-            includeHistory: context.family == .systemLarge
+            includeHistory: Self.showsHistory(context)
         )
         let refresh = WidgetRefreshSchedule.iOSNextRefresh(now: .now)
         return Timeline(entries: [entry], policy: .after(refresh))
+    }
+
+    /// History is one locked JSON read per reload, so only the families that
+    /// draw the streak line or the week strip pay for it.
+    private static func showsHistory(_ context: Context) -> Bool {
+        context.family == .systemMedium || context.family == .systemLarge
     }
 
     private func makeEntry(
@@ -133,14 +140,16 @@ struct SnapshotProvider: AppIntentTimelineProvider {
         )
     }
 
+    /// Six finished days, oldest first, so the gallery shows a streak line
+    /// and one confirmed crossing in the strip.
     private static var placeholderHistory: [DayRecord] {
         let calendar = Calendar.current
-        let exampleMinutes = [18, 32, 45, 22, 51, 29]
-        return (1...6).compactMap { daysAgo in
+        let exampleMinutes = [18, 32, 45, 22, 30, 29]
+        return exampleMinutes.enumerated().compactMap { index, minutes in
+            let daysAgo = exampleMinutes.count - index
             guard let date = calendar.date(byAdding: .day, value: -daysAgo, to: .now) else {
                 return nil
             }
-            let minutes = exampleMinutes[daysAgo - 1]
             return DayRecord(
                 dayKey: DayKey.today(date),
                 distractionMinutes: minutes,
@@ -193,151 +202,143 @@ struct NoiseGateWidgetEntryView: View {
 struct NoiseGateWidgetView: View {
     let entry: SnapshotEntry
     let family: WidgetFamily
-    /// Anchors the seven-day strip. WidgetKit renders against the clock, as
-    /// before; the preview passes a fixed date so its output is repeatable.
+    /// Anchors the seven-day strip, the streak and the clock line. WidgetKit
+    /// renders against the clock, as before; the preview passes a fixed date
+    /// so its output is repeatable.
     var now: Date = Date()
+    /// Named in the large footer. The idiom check lives in this target so
+    /// `Shared/` never asks UIKit; the preview overrides it to render the
+    /// iPad sentence on an iPhone simulator.
+    var device: String = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
 
-    private var primary: WidgetLedgerPresentation {
-        WidgetLedgerPresentation(
+    private var content: WidgetSystemContent {
+        WidgetSystemContent(
             snapshot: entry.snapshot,
-            ledger: entry.primaryLedger,
-            accuracy: .lowerBound
-        )
-    }
-
-    private var secondary: WidgetLedgerPresentation? {
-        guard let ledger = entry.secondaryLedger else { return nil }
-        return WidgetLedgerPresentation(
-            snapshot: entry.snapshot,
-            ledger: ledger,
-            accuracy: .lowerBound
+            history: entry.history,
+            primaryLedger: entry.primaryLedger,
+            secondaryLedger: entry.secondaryLedger,
+            accuracy: .lowerBound,
+            device: device,
+            now: now
         )
     }
 
     var body: some View {
+        let content = self.content
         switch family {
         case .accessoryCircular:
-            AccessoryCircle(presentation: primary)
+            AccessoryCircle(presentation: content.primary)
         case .accessoryRectangular:
-            AccessoryRectangle(primary: primary, secondary: secondary)
-        case .accessoryInline:
-            // Inline accessories get roughly a third of a line, so this is the
-            // ledger and the value and nothing else.
-            Text("\(primary.ledger.title) \(primary.valueText)")
-        case .systemSmall:
-            SmallSignalWidget(primary: primary, secondary: secondary)
-        case .systemMedium:
-            MediumSignalWidget(primary: primary, secondary: secondary)
-        case .systemLarge:
-            LargeSignalWidget(
-                primary: primary,
-                secondary: secondary,
-                summary: WidgetWeekSummary(
+            AccessoryRectangle(
+                primary: content.primary,
+                time: WidgetClockLine.time(
                     snapshot: entry.snapshot,
-                    history: entry.history,
                     ledger: entry.primaryLedger,
                     accuracy: .lowerBound,
                     now: now
                 )
             )
+        case .accessoryInline:
+            Label {
+                Text(content.primary.inlineText)
+            } icon: {
+                Image(systemName: WidgetStyle.symbol(content.primary))
+            }
+        case .systemSmall:
+            SmallSignalLayout(content: content)
+        case .systemMedium:
+            MediumSignalLayout(content: content)
+        case .systemLarge:
+            LargeSignalLayout(content: content)
         default:
-            SmallSignalWidget(primary: primary, secondary: secondary)
+            SmallSignalLayout(content: content)
         }
     }
 }
 
+// MARK: - Lock Screen families
+//
+// The system families live in Shared/WidgetViews.swift so the Mac widget
+// renders from exactly the same views. Only the family dispatch and the
+// accessory families, which are iPhone-only, stay here. The Lock Screen is
+// drawn by the system in vibrant monochrome, so nothing here sets a colour.
+
+/// The system gauge, which handles vibrant, accented and StandBy rendering
+/// itself. The value inside is hours-only past an hour so the digits never
+/// fall under 11 pt.
 private struct AccessoryCircle: View {
     let presentation: WidgetLedgerPresentation
 
     var body: some View {
-        Gauge(value: presentation.fraction) {
-            Image(systemName: accessorySymbol(presentation))
-        } currentValueLabel: {
-            Text(presentation.valueText)
-                .minimumScaleFactor(0.55)
+        ZStack {
+            AccessoryWidgetBackground()
+            Gauge(value: presentation.fraction) {
+                Image(systemName: WidgetStyle.symbol(presentation))
+            } currentValueLabel: {
+                Text(presentation.compactValueText)
+                    .font(.ngNumber(14))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .gaugeStyle(.accessoryCircular)
+            .widgetAccentable()
+            .accessibilityLabel(presentation.ledger.title)
+            .accessibilityValue(
+                "\(presentation.accessibilityValue). \(WidgetStyle.status(presentation))"
+            )
         }
-        .gaugeStyle(.accessoryCircular)
-        .accessibilityLabel(presentation.ledger.title)
-        .accessibilityValue("\(presentation.accessibilityValue). \(trackingStatus(presentation))")
     }
 }
 
+/// Eyebrow with the hour, the number with its budget on one baseline, and
+/// the status: the number is the point, so it gets the weight.
 private struct AccessoryRectangle: View {
     let primary: WidgetLedgerPresentation
-    let secondary: WidgetLedgerPresentation?
+    let time: String?
+
+    private var budgetText: String {
+        primary.level == .notConfigured
+            ? "Choose apps" : "of \(primary.budgetMinutes.asHoursMinutes)"
+    }
+
+    private var statusText: String {
+        primary.level == .notConfigured
+            ? "No apps selected yet" : WidgetStyle.status(primary)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Label(primary.ledger.title, systemImage: headerSymbol(primary))
-                .font(.headline)
-            Text(primary.valueAndBudgetText)
-                .font(.caption)
-            if primary.level == .notConfigured || !primary.monitoringIsActive {
-                Text(trackingStatus(primary))
-                    .font(.caption2)
-            } else if let secondary {
-                Text("\(secondary.ledger.title) \(secondary.valueAndBudgetText)")
-                    .font(.caption2)
-            } else {
-                Text(trackingStatus(primary))
-                    .font(.caption2)
+            HStack(spacing: 4) {
+                Image(systemName: WidgetStyle.symbol(primary))
+                    .font(.system(size: 11, weight: .bold))
+                Text(primary.ledger.title.uppercased())
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(1)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                if let time {
+                    Text(time)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                }
             }
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text(primary.valueText)
+                    .font(.ngNumber(22))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text(budgetText)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .widgetAccentable()
+            Text(statusText)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .minimumScaleFactor(0.92)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(primary.ledger.title)
-        .accessibilityValue(accessibilityValue)
+        .accessibilityValue("\(primary.accessibilityValue). \(statusText)")
     }
-
-    private var accessibilityValue: String {
-        let secondaryValue = secondary.map {
-            ". \($0.ledger.title), \($0.accessibilityValue)"
-        } ?? ""
-        return "\(primary.accessibilityValue). \(trackingStatus(primary))\(secondaryValue)"
-    }
-}
-
-// MARK: - System families
-//
-// The layouts themselves live in Shared/WidgetViews.swift so the Mac widget
-// renders from exactly the same views. Only the family dispatch and the
-// accessory families, which are iPhone-only, stay here.
-
-private struct SmallSignalWidget: View {
-    let primary: WidgetLedgerPresentation
-    let secondary: WidgetLedgerPresentation?
-
-    var body: some View {
-        SmallSignalLayout(primary: primary, secondary: secondary)
-    }
-}
-
-private struct MediumSignalWidget: View {
-    let primary: WidgetLedgerPresentation
-    let secondary: WidgetLedgerPresentation?
-
-    var body: some View {
-        MediumSignalLayout(primary: primary, secondary: secondary)
-    }
-}
-
-private struct LargeSignalWidget: View {
-    let primary: WidgetLedgerPresentation
-    let secondary: WidgetLedgerPresentation?
-    let summary: WidgetWeekSummary
-
-    var body: some View {
-        LargeSignalLayout(primary: primary, secondary: secondary, summary: summary)
-    }
-}
-
-private func accessorySymbol(_ presentation: WidgetLedgerPresentation) -> String {
-    WidgetStyle.symbol(presentation)
-}
-
-private func headerSymbol(_ presentation: WidgetLedgerPresentation) -> String {
-    WidgetStyle.symbol(presentation)
-}
-
-private func trackingStatus(_ presentation: WidgetLedgerPresentation) -> String {
-    WidgetStyle.status(presentation)
 }
