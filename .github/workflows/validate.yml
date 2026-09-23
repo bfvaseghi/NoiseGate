@@ -6,6 +6,11 @@ on:
     branches: [main, claude/xcode-apps-ui-retention-ep2v4v]
   workflow_dispatch:
 
+# A new push supersedes the one before it; no reason to keep paying for both.
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   structural:
     runs-on: ubuntu-latest

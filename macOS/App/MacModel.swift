@@ -90,7 +90,7 @@ struct MacLedger: Codable {
         )
     }
 
-    /// Converts Claude's v1 bundle-only totals exactly once. Messages wins an
+    /// Converts the v1 bundle-only totals exactly once. Messages wins an
     /// overlap, matching the live accrual rule, and v1's missing targets come
     /// from the user's persisted configuration rather than fabricated defaults.
     mutating func migrateLegacy(

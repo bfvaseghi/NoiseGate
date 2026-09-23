@@ -32,10 +32,14 @@ def select(devices, sdk_version=None):
                 uuid.UUID(identifier)
             except (KeyError, ValueError, TypeError, AttributeError):
                 continue
-            candidates.append((version, device["name"], identifier))
+            name = device["name"]
+            # Prefer a plain Pro model (the sizes the previews are laid out
+            # for) over the SE or a Max when several share the runtime.
+            pro = 1 if re.fullmatch(r"iPhone \d+ Pro", name) else 0
+            candidates.append((version, pro, name, identifier))
     if not candidates:
         raise ValueError("No available iPhone simulator with iOS 17.4 or later compatible with the selected SDK.")
-    return max(candidates)[2]
+    return max(candidates)[3]
 
 
 if __name__ == "__main__":

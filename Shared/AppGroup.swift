@@ -21,7 +21,7 @@ enum AppGroup {
 enum StoreKey {
     static let budgetConfig = "budgetConfig"        // BudgetConfig JSON
     static let usageSnapshot = "usageSnapshot"      // UsageSnapshot JSON (widget feed)
-    // Raw keys stay unchanged so upgrades preserve Claude's original data.
+    // Raw keys stay unchanged so an upgrade preserves the original data.
     static let distractionSelection = "noiseSelection" // FamilyActivitySelection JSON (iOS)
     static let messagesSelection = "messagesSelection"
     static let pausedDistractions = "mutedNoise"    // PausedTokens JSON (iOS)
