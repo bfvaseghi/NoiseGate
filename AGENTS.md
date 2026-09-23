@@ -62,6 +62,8 @@ Shared/
   DesignSystem.swift            Adaptive visual tokens
   AccentTheme.swift             User-selectable Distractions accent
   BudgetGauge.swift             Shared accessible ring
+  WidgetViews.swift             Every widget family's layout, both platforms
+  WidgetRefreshSchedule.swift   When a timeline asks to be rebuilt
 iOS/
   App/                          SwiftUI app: Today / Apps / Budgets
   App/Intents/                  App Intents and Shortcuts (floors only)
