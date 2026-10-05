@@ -102,15 +102,25 @@ compiles the widget's sources with `WIDGET_PREVIEW`, which drops the `@main`
 bundle, and `Tests/WidgetPreview/WidgetPreviewCatalog.swift` supplies the fixed
 scenes.  `NoiseGateWidgetView` takes its `family` as a value for this reason.
 
-Keep the placeholders synchronized until the owner replaces them:
+The identifiers are set and must stay synchronized:
 
-- Team: `YOURTEAMID`
-- Bundle prefix: `com.example.noisegate`
-- App Group: `group.com.example.noisegate` in `project.yml` and
+- Bundle prefix: `com.bardia.noisegate` (the Mac app is `.mac`, the
+  extensions and test bundles derive their own suffixes)
+- App Group: `group.com.bardia.noisegate` in `project.yml` and
   `Shared/AppGroup.swift`
+- Team: still the `YOURTEAMID` placeholder. `.github/workflows/testflight.yml`
+  passes the real team on the command line from a repository secret, and a
+  local build sets it with `Scripts/configure_signing.py --team-id`.
 
-Use `Scripts/configure_signing.py` to replace them as one validated change.
-Do not edit one identifier or App Group entry in isolation.
+Use `Scripts/configure_signing.py` for any identifier change, as one validated
+change. Do not edit one identifier or App Group entry in isolation.
+
+Every production target's Info.plist (generated from `project.yml`, not
+committed) takes `CFBundleVersion` and `CFBundleShortVersionString` from the
+build settings, never a literal: the TestFlight workflow passes its run number
+as `CURRENT_PROJECT_VERSION`, and App Store Connect refuses an extension whose
+build number differs from the app's. `Scripts/validate_project.py` checks all
+six `info.properties` blocks.
 
 ## Non-negotiable architecture rules
 

@@ -109,19 +109,24 @@ The Xcode project is generated from `project.yml` with
 brew install xcodegen
 ```
 
-Configure signing as one synchronized change. The command first shows a diff:
+The bundle identifiers are set: `com.bardia.noisegate` for the iPhone app,
+`com.bardia.noisegate.mac` for the Mac app, derived identifiers for the
+extensions, and the App Group `group.com.bardia.noisegate` on all six
+production targets. Only the Team ID is still a placeholder. Configure it as
+one synchronized change; the command first shows a diff:
 
 ```bash
 python3 Scripts/configure_signing.py \
   --team-id YOUR_REAL_TEAM_ID \
-  --app-bundle-id com.yourname.noisegate
+  --app-bundle-id com.bardia.noisegate
 ```
 
 Check the preview, then add `--apply`. The Team ID is the 10-character value in
-Apple Developer **Membership details**. Replace both examples with your real,
-permanent values. The app Bundle ID becomes the iOS app identifier. The script
-derives all extension identifiers and the App Group so one target cannot
-accidentally use a different value.
+Apple Developer **Membership details**. The script derives every extension
+identifier and the App Group from the app Bundle ID so one target cannot
+accidentally use a different value; pass a different `--app-bundle-id` only to
+move the whole app to another prefix. The TestFlight workflow below passes the
+team on the command line, so a cloud build never needs this step.
 
 Before building on a physical device:
 
@@ -144,9 +149,44 @@ checkpoint lower bound from past activity instead of presenting a false zero.
 Development builds work with the Family Controls capability.  App Store
 and TestFlight distribution require Apple’s approval for the Family Controls
 (Distribution) managed capability on the iOS app, monitor extension, and report
-extension separately. Public distribution also needs a privacy-policy URL in
-App Store Connect and an accessible privacy-policy link inside the app. That
-link is not yet included in NoiseGate.
+extension separately; the next section says how. Public distribution also
+needs a privacy-policy URL in App Store Connect and an accessible
+privacy-policy link inside the app. That link is not yet included in
+NoiseGate.
+
+## Install on your iPhone and Mac
+
+With a paid Apple Developer account, **Actions → TestFlight → Run workflow**
+signs both apps in the cloud and uploads them to TestFlight, so each installs
+from the TestFlight app with no cable and no Xcode, and every later run
+arrives as an update. Nothing goes to the App Store. The one-time setup:
+
+1. Add four repository secrets (Settings → Secrets and variables → Actions):
+   `APPLE_TEAM_ID`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8` (the full
+   text of the API key's `.p8` file). The key comes from App Store Connect →
+   Users and Access → Integrations → App Store Connect API, role App Manager.
+2. Create two app records in App Store Connect (My Apps → + → New App): an
+   iOS app with bundle ID `com.bardia.noisegate` and a macOS app with
+   `com.bardia.noisegate.mac`. The Mac app is a native macOS app with an
+   identifier of its own, so it has a record of its own.
+3. For the iPhone app, request the Family Controls (Distribution) capability
+   from Apple for the app, monitor, and report identifiers at
+   <https://developer.apple.com/contact/request/family-controls-distribution>.
+   A development build does not need it. A TestFlight build cannot be signed
+   without it, and the workflow says so when that is what stopped it.
+   Approval usually takes days.
+4. Run the workflow. Its **platform** input chooses `both`, `iphone`, or
+   `mac`. The Mac app needs no approval, so `mac` ships now.
+5. In App Store Connect → TestFlight, add yourself as an internal tester.
+   Install the TestFlight app on the iPhone and on the Mac, accept the
+   invitation, and install NoiseGate from it. The Mac app lives in the menu
+   bar: open it once from Applications and it stays there with no Dock icon.
+   Its widget is in Notification Center and on the desktop.
+
+TestFlight builds expire after ninety days; re-running the workflow renews
+them. Each run uploads a new build number, and every bundle in an archive
+carries the same one, because the Info.plists refer to the build setting
+rather than spelling a number.
 
 ## Validate
 
@@ -175,7 +215,8 @@ xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGateMac \
 ```
 
 GitHub Actions runs the structural audit, both builds, and the model migration
-tests on every pull request.
+tests on every pull request, and on demand signs and uploads both apps to
+TestFlight (`.github/workflows/testflight.yml`).
 
 ## Repository map
 

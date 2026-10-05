@@ -35,7 +35,7 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate
         INFOPLIST_KEY_CFBundleDisplayName: NoiseGate
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -43,6 +43,13 @@ targets:
     info:
       path: iOS/App/Info.plist
       properties:
+        # Version numbers come from the build settings in every production
+        # bundle, so one CURRENT_PROJECT_VERSION on the command line (the
+        # TestFlight workflow passes its run number) reaches the app and all
+        # of its extensions alike; App Store Connect refuses an archive whose
+        # extensions carry a different build number from the app's.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
@@ -61,7 +68,7 @@ targets:
       properties:
         com.apple.developer.family-controls: true
         com.apple.security.application-groups:
-          - group.com.example.noisegate
+          - group.com.bardia.noisegate
     dependencies:
       - target: NoiseGateMonitor
       - target: NoiseGateReport
@@ -81,11 +88,13 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.monitor
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.monitor
         TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: iOS/MonitorExtension/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: NoiseGate Monitor
         NSExtension:
           NSExtensionPointIdentifier: com.apple.deviceactivity.monitor-extension
@@ -95,7 +104,7 @@ targets:
       properties:
         com.apple.developer.family-controls: true
         com.apple.security.application-groups:
-          - group.com.example.noisegate
+          - group.com.bardia.noisegate
 
   # DeviceActivityReport extension: renders exact on-screen time for the
   # Distractions and Messages selections inside the app (privacy-preserving).
@@ -107,11 +116,13 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.report
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.report
         TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: iOS/ReportExtension/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: NoiseGate Report
         EXAppExtensionAttributes:
           EXExtensionPointIdentifier: com.apple.deviceactivityui.report-extension
@@ -120,7 +131,7 @@ targets:
       properties:
         com.apple.developer.family-controls: true
         com.apple.security.application-groups:
-          - group.com.example.noisegate
+          - group.com.bardia.noisegate
 
   # Home-screen / lock-screen widget.
   NoiseGateWidget:
@@ -131,11 +142,13 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.widget
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.widget
         TARGETED_DEVICE_FAMILY: "1,2"
     info:
       path: iOS/Widget/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: NoiseGate Widget
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -143,7 +156,7 @@ targets:
       path: iOS/Widget/NoiseGateWidget.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.example.noisegate
+          - group.com.bardia.noisegate
 
   # ────────────────────────────── macOS app ──────────────────────────────
   NoiseGateMac:
@@ -154,7 +167,7 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.mac
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.mac
         INFOPLIST_KEY_CFBundleDisplayName: NoiseGate
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
@@ -162,8 +175,13 @@ targets:
     info:
       path: macOS/App/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSUIElement: true   # menu-bar app, no Dock icon
         CFBundleDisplayName: NoiseGate
+        # Nothing here encrypts beyond what the system provides, so an
+        # upload to App Store Connect needs no export-compliance answer.
+        ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: macOS/App/NoiseGateMac.entitlements
       properties:
@@ -171,7 +189,7 @@ targets:
         # frontmost app and posts notifications — nothing needs to escape.
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
-          - group.com.example.noisegate
+          - group.com.bardia.noisegate
     dependencies:
       - target: NoiseGateMacWidget
     scheme:
@@ -186,10 +204,12 @@ targets:
       - Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.mac.widget
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.mac.widget
     info:
       path: macOS/Widget/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: NoiseGate Widget
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
@@ -198,7 +218,7 @@ targets:
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
-          - group.com.example.noisegate
+          - group.com.bardia.noisegate
 
   # ────────────────────────────── Tests ──────────────────────────────
   NoiseGateTests:
@@ -210,7 +230,7 @@ targets:
       - target: NoiseGate
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.tests
         TARGETED_DEVICE_FAMILY: "1,2"
         # Without this the .xctest bundle is built with no Info.plist, which
         # also means the bundle identifier above never reaches the product.
@@ -225,7 +245,7 @@ targets:
       - target: NoiseGateMac
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.mac.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.mac.tests
         GENERATE_INFOPLIST_FILE: YES
 
   # Renders the iPhone widget at every family, light and dark, to PNGs
@@ -245,7 +265,7 @@ targets:
           - "*.py"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.noisegate.widget-previews
+        PRODUCT_BUNDLE_IDENTIFIER: com.bardia.noisegate.widget-previews
         GENERATE_INFOPLIST_FILE: YES
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) WIDGET_PREVIEW"
         TARGETED_DEVICE_FAMILY: "1,2"

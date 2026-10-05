@@ -58,6 +58,14 @@ class ConfigureSigningTests(unittest.TestCase):
         self.assertIn(f'static let id = "group.{app_bundle_id}"', group)
         self.assertEqual(signing.configured_app_group(group, app_bundle_id), group)
 
+    def test_keeps_the_team_when_none_is_given(self):
+        app_bundle_id = "com.bfvaseghi.noisegate"
+        team_line = self._line_containing("DEVELOPMENT_TEAM:")
+        configured = signing.configured_project(self.project, None, app_bundle_id)
+        self.assertIn(team_line, configured)
+        self.assertIn(f"PRODUCT_BUNDLE_IDENTIFIER: {app_bundle_id}.mac", configured)
+        self.assertEqual(configured.count(f"- group.{app_bundle_id}"), 6)
+
     def test_refuses_incomplete_project(self):
         # Derive the fixtures from whatever identifiers project.yml currently
         # holds. Hardcoding the com.example.* placeholders made these silent

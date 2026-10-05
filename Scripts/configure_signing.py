@@ -62,6 +62,13 @@ def validate_app_bundle_id(value):
 
 
 def configured_project(source, team_id, app_bundle_id):
+    """The project with its identifiers set.
+
+    `team_id` may be None: the bundle identifiers and App Group are rewritten
+    and the DEVELOPMENT_TEAM line is left as it is. The TestFlight workflow
+    passes the real team on the xcodebuild command line, so the repository
+    never has to carry it.
+    """
     lines = source.splitlines(keepends=True)
     current_target = None
     replaced_targets = set()
@@ -76,8 +83,9 @@ def configured_project(source, team_id, app_bundle_id):
             current_target = name if name in TARGET_SUFFIXES else None
 
         if re.match(r"\s*DEVELOPMENT_TEAM:", line):
-            indent = line[:len(line) - len(line.lstrip())]
-            line = f'{indent}DEVELOPMENT_TEAM: "{team_id}"\n'
+            if team_id is not None:
+                indent = line[:len(line) - len(line.lstrip())]
+                line = f'{indent}DEVELOPMENT_TEAM: "{team_id}"\n'
             team_replacements += 1
         elif current_target and re.match(r"\s*PRODUCT_BUNDLE_IDENTIFIER:", line):
             indent = line[:len(line) - len(line.lstrip())]
@@ -187,7 +195,11 @@ def apply_and_validate(changes, app_bundle_id):
 
 def main():
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("--team-id", required=True, type=validate_team_id)
+    parser.add_argument(
+        "--team-id",
+        type=validate_team_id,
+        help="your 10-character Apple Team ID; omitted, the current value stays",
+    )
     parser.add_argument(
         "--app-bundle-id",
         required=True,
@@ -222,7 +234,10 @@ def main():
         ],
         args.app_bundle_id,
     )
-    print(f"Configured Team {args.team_id}")
+    if args.team_id is None:
+        print("Team ID left as it was (pass --team-id to set it)")
+    else:
+        print(f"Configured Team {args.team_id}")
     print(f"App Bundle ID: {args.app_bundle_id}")
     print(f"App Group: group.{args.app_bundle_id}")
     print("Next: register the identifiers in Apple Developer, then run xcodegen generate.")

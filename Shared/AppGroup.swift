@@ -4,7 +4,7 @@ import Foundation
 enum AppGroup {
     /// Configure this and every entitlement together with
     /// `Scripts/configure_signing.py`. Never edit one target in isolation.
-    static let id = "group.com.example.noisegate"
+    static let id = "group.com.bardia.noisegate"
 
     /// Resolved once per process. `UserDefaults` is thread-safe, and this is
     /// read from view bodies and five-second tracker ticks, so re-running the

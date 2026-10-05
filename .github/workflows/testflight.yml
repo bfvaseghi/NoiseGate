@@ -1,0 +1,249 @@
+name: TestFlight
+
+# Signs NoiseGate with your Apple Developer account and uploads it to
+# TestFlight, so both apps install from the TestFlight app with no cable and
+# no Xcode: the iPhone app from the first job, the Mac menu-bar app from the
+# second. Runs on demand only. Needs four repository secrets
+# (Settings → Secrets and variables → Actions):
+#   APPLE_TEAM_ID    your 10-character Team ID (developer.apple.com → Membership)
+#   ASC_KEY_ID       an App Store Connect API key's Key ID (Users and Access →
+#                    Integrations → App Store Connect API; role App Manager or Admin)
+#   ASC_ISSUER_ID    the Issuer ID shown on the same page
+#   ASC_KEY_P8       the downloaded AuthKey_<KEY_ID>.p8 file's full text
+# and two app records in App Store Connect (My Apps → + → New App): an iOS
+# app for com.bardia.noisegate and a macOS app for com.bardia.noisegate.mac.
+# The Mac app is a native macOS app with an identifier of its own, so it
+# cannot share the iPhone app's record the way a Mac Catalyst build would.
+# Optional: DIST_CERT_P12 (base64 of an Apple Distribution .p12) and
+# DIST_CERT_PASSWORD, to reuse one certificate instead of letting Xcode
+# create one on the runner (a team may hold at most three).
+#
+# The team is passed on the xcodebuild command line, so project.yml keeps
+# its placeholder and nothing in the repository changes for a run.
+#
+# The iPhone app, its monitor extension and its report extension carry the
+# Family Controls entitlement, and a build for App Store Connect can only be
+# signed once Apple has granted the Family Controls (Distribution) capability
+# to those three identifiers:
+#   https://developer.apple.com/contact/request/family-controls-distribution
+# Until then the iPhone job fails at the archive step and says so. The Mac
+# app uses no such entitlement, so platform=mac ships it in the meantime.
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Which app to upload
+        type: choice
+        default: both
+        options:
+          - both
+          - iphone
+          - mac
+
+jobs:
+  upload-iphone:
+    if: ${{ inputs.platform != 'mac' }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      DIST_CERT_P12: ${{ secrets.DIST_CERT_P12 }}
+      DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+      # App Store Connect rejects a second binary carrying a build number it
+      # has already seen, and project.yml pins it to 1. The run number rises
+      # with every run, so each upload is a new build of the same version,
+      # and every Info.plist refers to the setting so the extensions carry
+      # the same number as the app.
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the secrets
+        run: |
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            if [ -z "${!v}" ]; then echo "::error::Secret $v is not set (see the comment at the top of this workflow)"; missing=1; fi
+          done
+          [ -z "${missing:-}" ]
+      - name: Install the API key
+        run: |
+          mkdir -p ~/.private_keys
+          printf '%s\n' "$ASC_KEY_P8" > ~/.private_keys/AuthKey_$ASC_KEY_ID.p8
+          chmod 600 ~/.private_keys/AuthKey_$ASC_KEY_ID.p8
+      - name: Import a distribution certificate (optional)
+        if: env.DIST_CERT_P12 != ''
+        run: |
+          echo "$DIST_CERT_P12" | base64 -d > dist.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          # Without this the keychain relocks after five minutes and a long
+          # archive fails at the signing step with "User interaction is not
+          # allowed"; six hours outlives any build here.
+          security set-keychain-settings -lut 21600 build.keychain
+          security import dist.p12 -k build.keychain -P "$DIST_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm -f dist.p12
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Archive with automatic signing
+        run: |
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGate \
+            -sdk iphoneos -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/NoiseGate.xcarchive \
+            -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
+            -authenticationKeyPath ~/.private_keys/AuthKey_$ASC_KEY_ID.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive > archive.log 2>&1 || {
+              tail -n 120 archive.log
+              if grep -qi "family.controls" archive.log; then
+                echo "::error::Signing needs the Family Controls (Distribution) capability on the iOS app, monitor and report identifiers. Request it at https://developer.apple.com/contact/request/family-controls-distribution and re-run once Apple grants it; run with platform=mac to ship the Mac app meanwhile."
+              fi
+              exit 1
+            }
+          grep -E "error:|\*\* ARCHIVE" archive.log || true
+      - name: Export for App Store Connect
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/NoiseGate.xcarchive \
+            -exportOptionsPlist ExportOptions.plist -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.private_keys/AuthKey_$ASC_KEY_ID.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            > export.log 2>&1 || { tail -n 80 export.log; exit 1; }
+          ls -la build/export
+      - name: Upload to TestFlight
+        run: |
+          # The default shell is "bash -e" without pipefail, so piping altool
+          # into tail would report tail's success and hide a failed upload.
+          ipa=$(ls build/export/*.ipa 2>/dev/null | head -n 1)
+          if [ -z "$ipa" ]; then echo "::error::the export produced no .ipa"; exit 1; fi
+          if xcrun altool --upload-app -f "$ipa" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" > upload.log 2>&1; then
+            tail -n 20 upload.log
+          else
+            status=$?
+            tail -n 40 upload.log
+            echo "::error::altool failed to upload the build (exit $status)"
+            exit "$status"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: testflight-iphone-logs
+          path: |
+            archive.log
+            export.log
+            upload.log
+          if-no-files-found: ignore
+
+  # The Mac menu-bar app and its widget, uploaded to TestFlight for macOS so
+  # the TestFlight app on the Mac installs them the way the one on the phone
+  # does. The app is sandboxed with the hardened runtime, which is what App
+  # Store Connect requires of a Mac build. Same secrets, its own app record.
+  # This job runs beside the iPhone job and neither waits for the other.
+  upload-mac:
+    if: ${{ inputs.platform != 'iphone' }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      DIST_CERT_P12: ${{ secrets.DIST_CERT_P12 }}
+      DIST_CERT_PASSWORD: ${{ secrets.DIST_CERT_PASSWORD }}
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the secrets
+        run: |
+          for v in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
+            if [ -z "${!v}" ]; then echo "::error::Secret $v is not set (see the comment at the top of this workflow)"; missing=1; fi
+          done
+          [ -z "${missing:-}" ]
+      - name: Install the API key
+        run: |
+          mkdir -p ~/.private_keys
+          printf '%s\n' "$ASC_KEY_P8" > ~/.private_keys/AuthKey_$ASC_KEY_ID.p8
+          chmod 600 ~/.private_keys/AuthKey_$ASC_KEY_ID.p8
+      - name: Import a distribution certificate (optional)
+        if: env.DIST_CERT_P12 != ''
+        run: |
+          echo "$DIST_CERT_P12" | base64 -d > dist.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import dist.p12 -k build.keychain -P "$DIST_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm -f dist.p12
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - name: Archive for the Mac with automatic signing
+        run: |
+          xcodebuild -project NoiseGate.xcodeproj -scheme NoiseGateMac \
+            -configuration Release -destination 'generic/platform=macOS' \
+            -archivePath build/NoiseGateMac.xcarchive \
+            -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
+            -authenticationKeyPath ~/.private_keys/AuthKey_$ASC_KEY_ID.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            archive > archive-mac.log 2>&1 || { tail -n 120 archive-mac.log; exit 1; }
+          grep -E "error:|\*\* ARCHIVE" archive-mac.log || true
+      - name: Export for App Store Connect
+        run: |
+          cat > ExportOptions-mac.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/NoiseGateMac.xcarchive \
+            -exportOptionsPlist ExportOptions-mac.plist -exportPath build/export-mac \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.private_keys/AuthKey_$ASC_KEY_ID.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            > export-mac.log 2>&1 || { tail -n 80 export-mac.log; exit 1; }
+          ls -la build/export-mac
+      - name: Upload to TestFlight for macOS
+        run: |
+          pkg=$(ls build/export-mac/*.pkg 2>/dev/null | head -n 1)
+          if [ -z "$pkg" ]; then echo "::error::the Mac export produced no .pkg"; exit 1; fi
+          if xcrun altool --upload-app -f "$pkg" -t macos \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" > upload-mac.log 2>&1; then
+            tail -n 20 upload-mac.log
+          else
+            status=$?
+            tail -n 40 upload-mac.log
+            echo "::error::altool failed to upload the Mac build (exit $status)"
+            exit "$status"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: testflight-mac-logs
+          path: |
+            archive-mac.log
+            export-mac.log
+            upload-mac.log
+          if-no-files-found: ignore

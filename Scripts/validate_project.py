@@ -83,6 +83,25 @@ if project_groups and shared_group_match:
         require(project_groups[0] == f"group.{base_bundle_id}",
                 "App Group must be group.<iOS app bundle identifier>")
 
+# One build number for the whole archive. App Store Connect refuses an
+# extension whose CFBundleVersion differs from its app's, and the TestFlight
+# workflow sets CURRENT_PROJECT_VERSION on the command line, which reaches a
+# bundle only when its Info.plist refers to the setting instead of spelling
+# a number. The plists are generated from project.yml and not committed, so
+# the check is on the spec: every production target's `info.properties`
+# must name both keys, and name them as the build settings.
+info_paths = re.findall(r"^\s*path:\s*(\S+/Info\.plist)\s*$", project, re.MULTILINE)
+require(len(info_paths) == 6, "Every production target must have one Info.plist")
+for key, setting in (
+    ("CFBundleShortVersionString", "$(MARKETING_VERSION)"),
+    ("CFBundleVersion", "$(CURRENT_PROJECT_VERSION)"),
+):
+    values = re.findall(rf"^\s*{key}:\s*(\S+)\s*$", project, re.MULTILINE)
+    require(
+        len(values) == 6 and set(values) == {setting},
+        f"Every production Info.plist must take {key} from {setting} (found {values})",
+    )
+
 privacy_path = ROOT / "Shared/PrivacyInfo.xcprivacy"
 require(privacy_path.exists(), "Shared privacy manifest is missing")
 if privacy_path.exists():
